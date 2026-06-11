@@ -33,7 +33,7 @@ async def tarama_islemi(hedef, mesaj_kriteri, k_limit, m_limit):
     potansiyel_linkler = []
     
     # googlesearch-python kütüphanesi aramalar arasına bekleme süresi koyarak IP banı yemenizi engeller.
-    for j in search(dork_sorgusu, num_results=k_limit, lang="tr", pause=2.0): 
+    for j in search(dork_sorgusu, num_results=k_limit, lang="tr", sleep_interval=2.0): 
         if "t.me/" in j and not j.endswith(".me/"):
             potansiyel_linkler.append(j)
     
