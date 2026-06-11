@@ -13,7 +13,7 @@ SESSION_NAME = "bulut_oturum"
 
 # --- ARAYÜZ YAPILANDIRMASI ---
 st.set_page_config(page_title="OSINT Telegram Tarayıcı", page_icon="🔍")
-st.title("🔍 Dinamik Telegram İstihbarat Aracı")
+st.title("🔍 Siber Telegram Sorgu Aracı")
 st.write("Belirlediğiniz anahtar kelimelere göre açık kaynaklardan Telegram gruplarını bulur ve içeriklerini tarar.")
 st.markdown("---")
 
