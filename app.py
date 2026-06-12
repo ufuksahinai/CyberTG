@@ -36,66 +36,62 @@ import urllib.parse
 
 def bagimsiz_kanal_ara(kelime, limit):
     kanallar = set()
-    sorgu = urllib.parse.quote(f'site:t.me "{kelime}"')
+    # Tırnak işaretlerini kaldırdık, arama motorunun daha fazla sonuç bulmasını sağlıyoruz
+    sorgu = f'site:t.me {kelime}'
     
-    # Hedef arama motorlarının temel URL'leri
-    motorlar = [
-        f"https://www.bing.com/search?q={sorgu}&first=",
-        f"https://search.yahoo.com/search?p={sorgu}&b="
-    ]
-    
-    sayfa_sayisi = (limit // 10) + 1
-    
-    for temel_url in motorlar:
-        if len(kanallar) >= limit: break
-            
-        for sayfa in range(sayfa_sayisi):
-            parametre = (sayfa * 10) + 1
-            hedef_url = temel_url + str(parametre)
-            
-            # KRİTİK NOKTA: Streamlit IP'sini gizlemek için AllOrigins Köprüsü (Proxy) kullanıyoruz
-            proxy_url = f"https://api.allorigins.win/get?url={urllib.parse.quote(hedef_url)}"
-            
-            try:
-                # İsteği proxy üzerinden gönderiyoruz
-                cevap = requests.get(proxy_url, timeout=15)
-                veri = cevap.json()
-                
-                # Proxy başarılı olduysa sayfanın HTML içeriğini al
-                html_icerik = veri.get("contents", "")
-                
-                # Eğer proxy anlık olarak yanıt vermezse yedek (doğrudan) istek at
-                if not html_icerik:
-                    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-                    html_icerik = requests.get(hedef_url, headers=headers, timeout=10).text
-                
-                # Arama motorlarının gizlediği şifreli linkleri (t.me%2F) ve açık linkleri (t.me/) yakala
-                bulunan_isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', html_icerik)
-                
-                yeni_eklenen = 0
-                for isim in bulunan_isimler:
-                    # Alakasız Telegram komutlarını listeye sokma
-                    if isim.lower() not in ["share", "joinchat", "setlanguage", "socks", "search"]:
-                        kanal_linki = f"https://t.me/{isim}"
-                        if kanal_linki not in kanallar:
-                            kanallar.add(kanal_linki)
-                            yeni_eklenen += 1
-                
-                # Sayfada hiç yeni kanal kalmadıysa (arama bittiyse) diğer motora geç
-                if yeni_eklenen == 0:
-                    break 
-                    
-                if len(kanallar) >= limit:
-                    break
-                    
-                time.sleep(1) # Proxy'yi yormamak için 1 saniye bekle
-                
-            except Exception as e:
-                break # Çökmeyi engelle, diğer sayfaya/motora geç
-                
-    # Listeyi istenen limite kırparak döndür
-    return list(kanallar)[:limit]
+    # Bot olmadığımızı kanıtlayan zenginleştirilmiş, güncel başlık (Header)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Connection': 'keep-alive'
+    }
 
+    # ==========================================
+    # YÖNTEM 1: ASK.COM (Bulut IP'lerine toleranslı motor)
+    # ==========================================
+    sayfa_sayisi = (limit // 10) + 2
+    for sayfa in range(1, sayfa_sayisi):
+        if len(kanallar) >= limit: break
+        
+        url = f"https://www.ask.com/web?q={sorgu}&page={sayfa}"
+        try:
+            cevap = requests.get(url, headers=headers, timeout=10)
+            isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
+            
+            yeni_bulunan = 0
+            for isim in isimler:
+                if isim.lower() not in ["share", "joinchat", "setlanguage", "socks", "search"]:
+                    kanallar.add(f"https://t.me/{isim}")
+                    yeni_bulunan += 1
+            
+            if yeni_bulunan == 0: 
+                break # Bu sayfada sonuç yoksa diğer yönteme geç
+                
+            time.sleep(1.5) # Anti-Ban bekleme süresi
+        except Exception:
+            break
+
+    # ==========================================
+    # YÖNTEM 2: DUCKDUCKGO LITE (POST İstek Bypassing)
+    # ==========================================
+    if len(kanallar) < limit:
+        try:
+            url = "https://lite.duckduckgo.com/lite/"
+            # Sorguyu URL'ye yazmak yerine kapalı paket (Payload) olarak gönderiyoruz
+            payload = {'q': sorgu}
+            # GET yerine POST kullanmak güvenlik duvarlarını (WAF) atlatır
+            cevap = requests.post(url, data=payload, headers=headers, timeout=10)
+            isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
+            
+            for isim in isimler:
+                if isim.lower() not in ["share", "joinchat", "setlanguage", "socks", "search"]:
+                    kanallar.add(f"https://t.me/{isim}")
+        except Exception:
+            pass
+
+    # Toplanan benzersiz kanalları istenen limite göre kırpıp gönder
+    return list(kanallar)[:limit]
 if st.button("🔍 Kanal Taramasını Başlat"):
     if hedef_kelime:
         with st.spinner(f"Açık kaynaklarda '{hedef_kelime}' için gizlice Telegram kanalları aranıyor..."):
