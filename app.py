@@ -42,40 +42,53 @@ def bagimsiz_kanal_ara(kelime, limit):
         'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
     }
     
-    # İstenen limite göre kaç sayfa gezileceğini hesapla (Her sayfa ~10 sonuç verir)
-    sayfa_adim_sayisi = (limit // 10) + 1
+    # Arka sayfalara geçebilen (sayfalama) arama motorları listesi
+    motorlar = [
+        {"ad": "Yahoo", "url": f"https://search.yahoo.com/search?p={sorgu}&b="}, # 1, 11, 21
+        {"ad": "Bing", "url": f"https://www.bing.com/search?q={sorgu}&first="},  # 1, 11, 21
+        {"ad": "AOL", "url": f"https://search.aol.com/aol/search?q={sorgu}&b="}  # 1, 11, 21
+    ]
     
-    for sayfa_kademesi in range(sayfa_adim_sayisi):
-        # Bing'de sayfalar &first=1, 11, 21, 31 şeklinde ilerler
-        first_param = (sayfa_kademesi * 10) + 1
-        url = f"https://www.bing.com/search?q={sorgu}&first={first_param}"
-        
-        try:
-            cevap = requests.get(url, headers=headers, timeout=10)
-            bulunan_isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
+    # 50 sonuç isteniyorsa motor başına yaklaşık 2-3 sayfa gezmemiz gerekir
+    sayfa_sayisi = (limit // 10) + 1
+    
+    for motor in motorlar:
+        if len(kanallar) >= limit:
+            break # İstenen limite ulaşıldıysa diğer motora geçme
             
-            eklenen_yeni_kanal_sayisi = 0
-            for isim in bulunan_isimler:
-                if isim.lower() not in ["share", "joinchat", "setlanguage", "socks", "search"]:
-                    kanal_linki = f"https://t.me/{isim}"
-                    if kanal_linki not in kanallar:
-                        kanallar.add(kanal_linki)
-                        eklenen_yeni_kanal_sayisi += 1
+        for sayfa in range(sayfa_sayisi):
+            # Arama motorlarında sayfalar 1, 11, 21 şeklinde ilerler
+            parametre = (sayfa * 10) + 1
+            url = motor["url"] + str(parametre)
             
-            # Eğer bu sayfada hiç yeni kanal bulamadıysa (arama motoru sonuçları bittiyse) döngüyü sonlandır
-            if eklenen_yeni_kanal_sayisi == 0:
-                break
+            try:
+                cevap = requests.get(url, headers=headers, timeout=10)
                 
-            # İstenen hedef limite ulaşıldıysa aramayla vakit kaybetme
-            if len(kanallar) >= limit:
-                break
+                # Şifrelenmiş veya açık t.me bağlantılarını yakala
+                bulunan_isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
                 
-            time.sleep(2) # Ban yememek için arka sayfaya geçerken 2 saniye bekle
-            
-        except Exception as e:
-            break
-            
-    # Sadece kullanıcının istediği limit kadarını listeye çevirip döndür
+                yeni_eklenen = 0
+                for isim in bulunan_isimler:
+                    # Alakasız Telegram komutlarını temizle
+                    if isim.lower() not in ["share", "joinchat", "setlanguage", "socks", "search"]:
+                        kanal_linki = f"https://t.me/{isim}"
+                        if kanal_linki not in kanallar:
+                            kanallar.add(kanal_linki)
+                            yeni_eklenen += 1
+                
+                # Eğer o sayfa boş geldiyse (motor sınırı veya ban), hemen bir sonraki motora geç
+                if yeni_eklenen == 0:
+                    break 
+                    
+                if len(kanallar) >= limit:
+                    break
+                    
+                time.sleep(2) # Sayfa değiştirirken 2 saniye bekle (Bot koruması)
+                
+            except Exception:
+                break # Herhangi bir bağlantı hatasında çökmek yerine diğer motora geç
+                
+    # Toplanan sonuçları kullanıcının istediği limite kırparak gönder
     return list(kanallar)[:limit]
 
 if st.button("🔍 Kanal Taramasını Başlat"):
