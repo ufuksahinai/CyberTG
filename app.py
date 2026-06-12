@@ -3,7 +3,7 @@ import pandas as pd
 import asyncio
 import time
 from telethon import TelegramClient
-from googlesearch import search
+from duckduckgo_search import DDGS
 
 # --- TELEGRAM API BİLGİLERİ ---
 # Güvenlik için bu bilgileri Streamlit Secrets üzerinden çekeceğiz
@@ -32,12 +32,16 @@ async def tarama_islemi(hedef, mesaj_kriteri, k_limit, m_limit):
     dork_sorgusu = f'site:t.me "{hedef}"' # Özel sorgu oluşturulur
     potansiyel_linkler = []
     
-    # googlesearch-python kütüphanesi aramalar arasına bekleme süresi koyarak IP banı yemenizi engeller.
-    for j in search(dork_sorgusu, num_results=k_limit, lang="tr", sleep_interval=2.0): 
-        if "t.me/" in j and not j.endswith(".me/"):
-            potansiyel_linkler.append(j)
+    #İPTAL googlesearch-python kütüphanesi aramalar arasına bekleme süresi koyarak IP banı yemenizi engeller.
+    potansiyel_linkler = []
     
-    st.success(f"{len(potansiyel_linkler)} adet potansiyel Telegram bağlantısı bulundu!")
+    # DuckDuckGo kütüphanesi bulut sunucularında CAPTCHA engeline takılmaz
+    with DDGS() as ddgs:
+        sonuclar = ddgs.text(dork_sorgusu, max_results=k_limit)
+        for r in sonuclar:
+            link = r.get("href", "")
+            if "t.me/" in link and not link.endswith(".me/"):
+                potansiyel_linkler.append(link)
     
     # 2. Aşama: Telethon ile Mesaj Tarama
     st.info("2. ADIM: Bulunan kanalların içerisine girilerek mesajlar taranıyor...")
