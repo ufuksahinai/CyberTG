@@ -34,80 +34,112 @@ with col2:
 
 import urllib.parse
 
+import urllib.parse
+from bs4 import BeautifulSoup
+import requests
+import re
+import time
+
 def bagimsiz_kanal_ara(kelime, limit):
     kanallar = set()
     kelime_url = urllib.parse.quote(kelime)
-    sorgu_url = urllib.parse.quote(f'site:t.me "{kelime}"')
+    sorgu = urllib.parse.quote(f'site:t.me "{kelime}"')
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/json,application/xhtml+xml'
     }
 
     # ==========================================
-    # YÖNTEM 1: TELEGRAM KANAL DİZİNLERİNİ KAZIMA (Sansür ve Ban Yok)
+    # YÖNTEM 1: DİZİNLER (Sadece Gerçek Kanalları Okur, Menüleri Atlar)
     # ==========================================
-    dizinler = [
-        f"https://telegramchannels.me/search?q={kelime_url}",
-        f"https://tlgrm.eu/channels?search={kelime_url}"
+    try:
+        # tlgrm.eu sitesindeki kanallar /channel/ ile başlar (Kategoriler ise /channels/ ile başlar)
+        url = f"https://tlgrm.eu/channels?search={kelime_url}"
+        cevap = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(cevap.text, 'html.parser')
+        
+        for a in soup.find_all('a', href=True):
+            href = a['href']
+            # Sadece gerçek kanal linklerini alıyoruz
+            if href.startswith('/channel/') and not href.startswith('/channel/category'):
+                kanal_adi = href.split('/')[-1]
+                kanallar.add(f"https://t.me/{kanal_adi}")
+    except:
+        pass
+
+    try:
+        url = f"https://telegramchannels.me/search?q={kelime_url}"
+        cevap = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(cevap.text, 'html.parser')
+        
+        for a in soup.find_all('a', href=True):
+            href = a['href']
+            if href.startswith('https://telegramchannels.me/channels/') or href.startswith('/channels/'):
+                isim = href.split('/')[-1]
+                # Sitenin menü tuşlarını engelliyoruz
+                if isim not in ['category', 'search', 'add', 'contact', 'top', 'new']:
+                    kanallar.add(f"https://t.me/{isim}")
+    except:
+        pass
+
+    # ==========================================
+    # YÖNTEM 2: SEARXNG JSON API (HTML Parsing Gerektirmez, Doğrudan Link Verir)
+    # ==========================================
+    searx_motorlari = [
+        f"https://searx.be/search?q={sorgu}&format=json",
+        f"https://paulgo.io/search?q={sorgu}&format=json",
+        f"https://search.mdosch.de/search?q={sorgu}&format=json"
     ]
-    
-    for url in dizinler:
+
+    for url in searx_motorlari:
+        if len(kanallar) >= limit: break
         try:
             cevap = requests.get(url, headers=headers, timeout=10)
-            # Dizin web sitelerindeki gizli kanal adlarını yakalar (@kanaladi veya /channels/kanaladi)
-            isimler = re.findall(r'(?:t\.me/|@|/channels/)([a-zA-Z0-9_]{5,})', cevap.text)
-            for isim in isimler:
-                kanallar.add(f"https://t.me/{isim}")
-        except Exception:
+            if cevap.status_code == 200:
+                veriler = cevap.json() # Sitenin kaynak kodu yerine doğrudan JSON verisi çeker
+                for sonuc in veriler.get('results', []):
+                    link = sonuc.get('url', '')
+                    if "t.me/" in link and not link.endswith(".me/"):
+                        kanallar.add(link)
+        except:
             pass
 
     # ==========================================
-    # YÖNTEM 2: SANSÜRSÜZ MERKEZİYETSİZ MOTORLAR (SearXNG & Qwant)
+    # YÖNTEM 3: DUCKDUCKGO HTML (Yedek Ağ)
     # ==========================================
-    sayfa_sayisi = (limit // 10) + 2
-    ozgur_motorlar = [
-        "https://searx.be/search?q={}&pageno={}",
-        "https://paulgo.io/search?q={}&pageno={}",
-        "https://lite.qwant.com/?q={}&b={}" # Qwant için ofset: 0, 10, 20...
-    ]
-    
-    for motor_sablonu in ozgur_motorlar:
-        if len(kanallar) >= limit: break
-            
-        for sayfa in range(1, sayfa_sayisi + 1):
-            try:
-                # Qwant için sayfalama formülü farklıdır
-                if "qwant" in motor_sablonu:
-                    url = motor_sablonu.format(sorgu_url, (sayfa-1)*10)
-                else:
-                    url = motor_sablonu.format(sorgu_url, sayfa)
-                    
-                cevap = requests.get(url, headers=headers, timeout=10)
-                isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
-                
-                yeni_eklenen = 0
-                for isim in isimler:
-                    kanallar.add(f"https://t.me/{isim}")
-                    yeni_eklenen += 1
-                
-                if yeni_eklenen == 0:
-                    break # Motor boş döndüyse diğerine atla
-                    
-                time.sleep(1) # Saniyede 1 istek
-            except Exception:
-                break
+    if len(kanallar) < limit // 2:
+        try:
+            url = f"https://html.duckduckgo.com/html/?q={sorgu}"
+            cevap = requests.get(url, headers=headers, timeout=10)
+            isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
+            for isim in isimler:
+                kanallar.add(f"https://t.me/{isim}")
+        except: 
+            pass
 
     # ==========================================
-    # TEMİZLİK VE FİLTRELEME
+    # KESİN TEMİZLİK VE FİLTRELEME
     # ==========================================
     temiz_kanallar = list()
-    # Bağlantı hatalarını ve alakasız Telegram menülerini temizliyoruz
-    yasakli_kelimeler = ["share", "joinchat", "setlanguage", "socks", "search", "proxy", "addtheme", "channels", "contact"]
     
+    # Karşınıza çıkan o can sıkıcı menü kelimelerini sonsuza dek kara listeye aldık
+    yasakli_kelimeler = [
+        "share", "joinchat", "setlanguage", "socks", "search", "proxy", "category",
+        "adult", "video", "music", "books", "gaming", "blogs", "education", 
+        "entertainment", "media", "politics", "business", "crypto", "language", 
+        "sales", "suggest", "other", "index", "username", "contact", "art", "news"
+    ]
+
     for kanal in kanallar:
-        kanal_kucuk = kanal.lower()
-        if not any(yasakli in kanal_kucuk for yasakli in yasakli_kelimeler):
-            temiz_kanallar.append(kanal)
+        isim = kanal.split('/')[-1].lower()
+        
+        # 1. Kural: Kanal adı en az 5 harf olmalı (t.me/abc geçersizdir)
+        # 2. Kural: Yasaklı listedeki menü isimlerinden biri olmamalı
+        if len(isim) >= 5 and isim not in yasakli_kelimeler:
+            # 3. Kural: Hatalı davet linkleri ve teknik komutlar olmamalı
+            if not any(yasakli in kanal.lower() for yasakli in ["joinchat", "setlanguage", "share", "socks", "+"]):
+                temiz_kanallar.append(kanal)
 
     return temiz_kanallar[:limit]
 if st.button("🔍 Kanal Taramasını Başlat"):
