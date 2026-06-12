@@ -109,7 +109,7 @@ def bagimsiz_kanal_ara(kelime, limit):
             else: st.success(log)
             
         if len(temiz_kanallar) == 0:
-            st.warning("⚠️ Tarama çalıştı ancak motorlarda bu kelimeyle eşleşen Telegram davet linki bulunamadı.")
+            st.warning("⚠️ Tarama çalıştı ancak motorlarda bu kelimeyle eşleşen Telegram davet linki bulunamadı. Lütfen kelimeyi değiştirerek deneyin.")
 
     return temiz_kanallar[:limit]
 
