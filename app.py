@@ -4,9 +4,12 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import time
-import urllib.parse
 from io import BytesIO
 from fpdf import FPDF
+
+# --- ÇÖKME (NAME ERROR) ÖNLEYİCİ - DEĞİŞKENLERİ SABİTLE ---
+hedef_kelime = ""
+mesaj_kelimesi = ""
 
 # --- ARAYÜZ YAPILANDIRMASI ---
 st.set_page_config(page_title="Tam Bağımsız Telegram OSINT", page_icon="🕵️‍♂️", layout="wide")
@@ -23,16 +26,8 @@ if 'tarama_bitti' not in st.session_state:
     st.session_state.tarama_bitti = False
 
 # ==========================================
-# 1. AŞAMA: ALTERNATİF MOTORLAR İLE KANAL KEŞFİ
+# KANAL TARAMA FONKSİYONU
 # ==========================================
-st.header("1. Aşama: Hedef Kanalların Tespiti")
-col1, col2 = st.columns(2)
-
-with col1:
-    hedef_kelime = st.text_input("Kanal Bulmak İçin Anahtar Kelime:", placeholder="Örn: bahis")
-with col2:
-    kanal_limiti = st.selectbox("Bulunacak Maksimum Kanal Sayısı (Tahmini):", [20, 50, 100])
-
 def bagimsiz_kanal_ara(kelime, limit):
     kanallar = set()
     loglar = [] 
@@ -42,23 +37,22 @@ def bagimsiz_kanal_ara(kelime, limit):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     }
 
-    # YÖNTEM 1: DUCKDUCKGO LITE (Kapalı Paket - POST Metodu)
+    # YÖNTEM 1: DUCKDUCKGO LITE (Kapalı Paket)
     try:
         url = "https://lite.duckduckgo.com/lite/"
         payload = {'q': sorgu}
-        
         cevap = requests.post(url, data=payload, headers=headers, timeout=10)
         if cevap.status_code == 200:
             isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
             for isim in isimler:
                 kanallar.add(f"https://t.me/{isim}")
-            loglar.append(f"✅ DuckDuckGo Lite: Başarıyla tarandı. ({len(isimler)} ham veri toplandı)")
+            loglar.append(f"✅ DuckDuckGo Lite: Başarıyla {len(isimler)} veri topladı.")
         else:
             loglar.append(f"❌ DuckDuckGo Lite Engelledi: HTTP Kodu {cevap.status_code}")
     except Exception as e:
-        loglar.append(f"❌ DuckDuckGo Lite Bağlantı Hatası: {e}")
+        loglar.append(f"❌ DuckDuckGo Lite Bağlantı Hatası.")
 
-    # YÖNTEM 2: SEARXNG (Özgür Motorlar - Saf JSON Mimarisi)
+    # YÖNTEM 2: SEARXNG (Özgür Motorlar)
     searx_motorlari = [
         "https://searx.be/search",
         "https://searx.tiekoetter.com/search",
@@ -70,7 +64,6 @@ def bagimsiz_kanal_ara(kelime, limit):
         try:
             params = {'q': sorgu, 'format': 'json'}
             cevap = requests.get(motor, params=params, headers=headers, timeout=10)
-            
             if cevap.status_code == 200:
                 veriler = cevap.json()
                 yeni_bulunan = 0
@@ -81,11 +74,11 @@ def bagimsiz_kanal_ara(kelime, limit):
                         if eslesme:
                             kanallar.add(f"https://t.me/{eslesme.group(1)}")
                             yeni_bulunan += 1
-                loglar.append(f"✅ SearXNG ({motor.split('/')[2]}): Başarıyla tarandı. ({yeni_bulunan} veri toplandı)")
+                loglar.append(f"✅ SearXNG ({motor.split('/')[2]}): {yeni_bulunan} veri topladı.")
             else:
-                loglar.append(f"❌ SearXNG ({motor.split('/')[2]}): HTTP {cevap.status_code} ile engelledi.")
-        except Exception as e:
-            loglar.append(f"❌ SearXNG ({motor.split('/')[2]}): Sunucu yanıt vermedi.")
+                loglar.append(f"❌ SearXNG ({motor.split('/')[2]}): Engellendi.")
+        except Exception:
+            pass
 
     # KESİN TEMİZLİK
     temiz_kanallar = list()
@@ -102,18 +95,34 @@ def bagimsiz_kanal_ara(kelime, limit):
             if not any(y in k.lower() for y in ["joinchat", "setlanguage", "share"]):
                 temiz_kanallar.append(k)
 
-    # GÖRSEL RAPOR EKRANI (LOGLAR)
+    # GÖRSEL RAPOR EKRANI
     with st.expander("🔍 Geliştirici Raporu (Hangi Veri Nereden Çekildi?)", expanded=True):
         for log in loglar:
             if "❌" in log: st.error(log)
             else: st.success(log)
             
         if len(temiz_kanallar) == 0:
-            st.warning("⚠️ Tarama çalıştı ancak motorlarda bu kelimeyle eşleşen Telegram davet linki bulunamadı. Lütfen kelimeyi değiştirerek deneyin.")
+            st.warning("⚠️ Tarama çalıştı ancak motorlarda bu kelimeyle eşleşen Telegram davet linki bulunamadı.")
 
     return temiz_kanallar[:limit]
 
-if st.button("🔍 Kanal Taramasını Başlat"):
+
+# ==========================================
+# 1. AŞAMA: ARAYÜZ (FORM KULLANIMI)
+# ==========================================
+st.header("1. Aşama: Hedef Kanalların Tespiti")
+
+# Form kullanılarak değişkenlerin anlık kaybolması (NameError) engellendi
+with st.form("kanal_arama_formu"):
+    col1, col2 = st.columns(2)
+    with col1:
+        hedef_kelime = st.text_input("Kanal Bulmak İçin Anahtar Kelime:", placeholder="Örn: bahis")
+    with col2:
+        kanal_limiti = st.selectbox("Bulunacak Maksimum Kanal Sayısı (Tahmini):", [20, 50, 100])
+    
+    kanal_arama_baslat = st.form_submit_button("🔍 Kanal Taramasını Başlat")
+
+if kanal_arama_baslat:
     if hedef_kelime:
         with st.spinner(f"Açık kaynaklarda '{hedef_kelime}' için gizlice Telegram kanalları aranıyor..."):
             sonuclar = bagimsiz_kanal_ara(hedef_kelime, kanal_limiti)
@@ -121,7 +130,7 @@ if st.button("🔍 Kanal Taramasını Başlat"):
             st.session_state.bulunan_mesajlar = [] 
             st.session_state.tarama_bitti = False
     else:
-        st.warning("Lütfen arama yapmak için bir anahtar kelime girin.")
+        st.error("Lütfen arama yapmak için bir anahtar kelime girin.")
 
 # ==========================================
 # KANAL LİSTELEME VE 2. AŞAMAYA GEÇİŞ
@@ -134,7 +143,9 @@ if len(st.session_state.bulunan_kanallar) > 0:
     st.markdown("---")
     st.header("2. Aşama: Kanal İçi Mesaj Taraması (Kimliksiz)")
     
-    mesaj_kelimesi = st.text_input("Sohbet Geçmişinde Aranacak Kelime:", placeholder="Örn: iddaa")
+    with st.form("mesaj_arama_formu"):
+        mesaj_kelimesi = st.text_input("Sohbet Geçmişinde Aranacak Kelime:", placeholder="Örn: iddaa")
+        mesaj_arama_baslat = st.form_submit_button("💬 Sohbet Taramasını Başlat")
 
     def web_view_mesaj_tara(kanallar, aranacak_kelime):
         veriler = []
@@ -174,14 +185,14 @@ if len(st.session_state.bulunan_kanallar) > 0:
             
         return veriler
 
-    if st.button("💬 Sohbet Taramasını Başlat"):
+    if mesaj_arama_baslat:
         if mesaj_kelimesi:
             with st.spinner("Telegram Web Görünümü üzerinden mesajlar aranıyor..."):
                 sonuclar = web_view_mesaj_tara(st.session_state.bulunan_kanallar, mesaj_kelimesi)
                 st.session_state.bulunan_mesajlar = sonuclar
                 st.session_state.tarama_bitti = True
         else:
-            st.warning("Lütfen aranacak mesaj kelimesini girin.")
+            st.error("Lütfen aranacak mesaj kelimesini girin.")
 
 # ==========================================
 # 3. AŞAMA: SONUÇ RAPORLAMA VE İNDİRME
@@ -219,4 +230,4 @@ if st.session_state.tarama_bitti:
         with col_pdf:
             st.download_button(label="📄 PDF Olarak İndir", data=pdf_data, file_name="telegram_rapor.pdf", mime="application/pdf")
     else:
-        st.warning(f"Belirlediğiniz kanalların son güncel mesajları arasında '{mesaj_kelimesi}' kelimesine rastlanmadı.")
+        st.warning(f"Belirlediğiniz kanalların son güncel mesajları arasında aranan kelimeye rastlanmadı.")
