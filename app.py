@@ -8,8 +8,8 @@ from io import BytesIO
 from fpdf import FPDF
 
 # --- ARAYÜZ YAPILANDIRMASI ---
-st.set_page_config(page_title="Tam Bağımsız Telegram OSINT", page_icon="🕵️‍♂️", layout="wide")
-st.title("🕵️‍♂️ Tam Bağımsız Telegram İstihbarat Aracı")
+st.set_page_config(page_title="Siber Telegram OSINT", page_icon="🕵️‍♂️", layout="wide")
+st.title("🕵️‍♂️ Siber Telegram İstihbarat Aracı")
 st.write("Google API veya Telegram girişi gerektirmez. %100 Anonim olarak açık kaynakları tarar.")
 st.markdown("---")
 
