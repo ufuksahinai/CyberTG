@@ -47,90 +47,102 @@ from bs4 import BeautifulSoup
 import re
 import streamlit as st
 
+import urllib.parse
+from bs4 import BeautifulSoup
+import re
+import requests
+import time
+import streamlit as st
+
 def bagimsiz_kanal_ara(kelime, limit):
     kanallar = set()
-    loglar = [] # Artık neyin ters gittiğini veya başarılı olduğunu kaydediyoruz
-
+    loglar = [] # Ekranda ne olduğunu göreceğimiz rapor listesi
     sorgu = f'site:t.me "{kelime}"'
-    kelime_url = urllib.parse.quote(kelime)
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    }
 
     # ==========================================
-    # 1. YÖNTEM: DUCKDUCKGO (Dahili Proxy Kullanır)
+    # 1. YÖNTEM: DUCKDUCKGO LITE (Kapalı Paket - POST Metodu)
+    # Kütüphane kullanmaz. Doğrudan sunucuya WAF atlatıcı paket atar.
     # ==========================================
     try:
-        with DDGS() as ddgs:
-            sonuclar = list(ddgs.text(sorgu, max_results=limit))
-            for sonuc in sonuclar:
-                link = sonuc.get('href', '')
-                if "t.me/" in link:
-                    kanallar.add(link)
-        loglar.append("✅ DuckDuckGo Araması Başarılı: Bağlantılar çekildi.")
-    except Exception as e:
-        loglar.append(f"❌ DuckDuckGo Hatası: {e}")
-
-    # ==========================================
-    # 2. YÖNTEM: CLOUDSCRAPER İLE CLOUDFLARE AŞIMI (Dizin Siteleri)
-    # ==========================================
-    try:
-        # Normal bot değil, Chrome tarayıcısı taklidi yapan özel aşım aracı
-        scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
+        url = "https://lite.duckduckgo.com/lite/"
+        payload = {'q': sorgu}
         
-        # Site 1: Tlgrm.eu
-        cevap = scraper.get(f"https://tlgrm.eu/channels?search={kelime_url}", timeout=15)
+        cevap = requests.post(url, data=payload, headers=headers, timeout=10)
         if cevap.status_code == 200:
-            soup = BeautifulSoup(cevap.text, 'html.parser')
-            for a in soup.find_all('a', href=True):
-                href = a['href']
-                if href.startswith('/channel/') and 'category' not in href:
-                    kanallar.add(f"https://t.me/{href.split('/')[-1]}")
-            loglar.append("✅ Tlgrm.eu Başarılı: Cloudflare duvarı aşıldı.")
+            isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
+            for isim in isimler:
+                kanallar.add(f"https://t.me/{isim}")
+            loglar.append(f"✅ DuckDuckGo Lite: Başarıyla tarandı. ({len(isimler)} ham veri)")
         else:
-            loglar.append(f"❌ Tlgrm.eu Engelledi: HTTP Kodu {cevap.status_code}")
-            
-        # Site 2: Telegramchannels.me
-        cevap2 = scraper.get(f"https://telegramchannels.me/search?q={kelime_url}", timeout=15)
-        if cevap2.status_code == 200:
-            soup2 = BeautifulSoup(cevap2.text, 'html.parser')
-            for a in soup2.find_all('a', href=True):
-                href = a['href']
-                if '/channels/' in href:
-                    isim = href.split('/')[-1]
-                    kanallar.add(f"https://t.me/{isim}")
-            loglar.append("✅ Telegramchannels.me Başarılı: Cloudflare duvarı aşıldı.")
-        else:
-            loglar.append(f"❌ Telegramchannels Engelledi: HTTP Kodu {cevap2.status_code}")
-            
+            loglar.append(f"❌ DuckDuckGo Lite Engelledi: HTTP Kodu {cevap.status_code}")
     except Exception as e:
-        loglar.append(f"❌ Cloudscraper Hatası: {e}")
+        loglar.append(f"❌ DuckDuckGo Lite Bağlantı Hatası: {e}")
 
     # ==========================================
-    # KESİN TEMİZLİK VE FİLTRELEME
+    # 2. YÖNTEM: SEARXNG (Özgür Motorlar - Saf JSON Mimarisi)
+    # Kütüphane kullanmaz. Doğrudan API yanıtlarını çeker.
     # ==========================================
-    temiz_kanallar = set()
-    # Sahte kanalları ve menü tuşlarını kesin olarak yok etme listesi
-    yasakli = ["share", "joinchat", "setlanguage", "socks", "search", "category", "contact", "add", "top", "new"]
+    searx_motorlari = [
+        "https://searx.be/search",
+        "https://searx.tiekoetter.com/search",
+        "https://search.mdosch.de/search"
+    ]
+    
+    for motor in searx_motorlari:
+        if len(kanallar) >= limit: break
+        try:
+            params = {'q': sorgu, 'format': 'json'}
+            cevap = requests.get(motor, params=params, headers=headers, timeout=10)
+            
+            if cevap.status_code == 200:
+                veriler = cevap.json()
+                yeni_bulunan = 0
+                for sonuc in veriler.get('results', []):
+                    link = sonuc.get('url', '')
+                    if "t.me/" in link:
+                        eslesme = re.search(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', link)
+                        if eslesme:
+                            kanallar.add(f"https://t.me/{eslesme.group(1)}")
+                            yeni_bulunan += 1
+                loglar.append(f"✅ SearXNG ({motor.split('/')[2]}): Başarıyla tarandı. ({yeni_bulunan} ham veri)")
+            else:
+                loglar.append(f"❌ SearXNG ({motor.split('/')[2]}): HTTP {cevap.status_code} ile engelledi.")
+        except Exception as e:
+            loglar.append(f"❌ SearXNG ({motor.split('/')[2]}): Sunucu yanıt vermedi.")
+
+    # ==========================================
+    # KESİN TEMİZLİK (Menü ve Botların Silinmesi)
+    # ==========================================
+    temiz_kanallar = list()
+    yasakli_kelimeler = [
+        "share", "joinchat", "setlanguage", "socks", "search", "category", "contact", 
+        "add", "top", "new", "adult", "video", "music", "books", "gaming", "blogs", 
+        "education", "entertainment", "media", "politics", "business", "crypto", 
+        "language", "sales", "suggest", "other", "index", "username", "art", "news", "about"
+    ]
     
     for k in kanallar:
-        try:
-            # Sadece t.me/ sonrasındaki "gerçek kullanıcı adını" Regex ile söküp alıyoruz
-            eslesme = re.search(r't\.me(?:/s/|/)([a-zA-Z0-9_]+)', k)
-            if eslesme:
-                isim = eslesme.group(1)
-                # İsim en az 5 harf olmalı ve menü komutlarından biri olmamalı
-                if len(isim) >= 4 and isim.lower() not in yasakli:
-                    temiz_kanallar.add(f"https://t.me/{isim}")
-        except:
-            pass
+        isim = k.split('/')[-1].lower()
+        if len(isim) >= 5 and isim not in yasakli_kelimeler:
+            if not any(y in k.lower() for y in ["joinchat", "setlanguage", "share"]):
+                temiz_kanallar.append(k)
 
-    # KULLANICI ARAYÜZÜNE RAPOR BASMA
-    with st.expander("🔍 Geliştirici Logları (Arka Planda Neler Olduğunu Görün)"):
+    # ==========================================
+    # GÖRSEL RAPOR EKRANI (LOGLAR)
+    # ==========================================
+    with st.expander("🔍 Tarama Raporunu Göster (Tıklayın)", expanded=True):
         for log in loglar:
-            if "❌" in log:
-                st.error(log)
-            else:
-                st.success(log)
+            if "❌" in log: st.error(log)
+            else: st.success(log)
+            
+        if len(temiz_kanallar) == 0:
+            st.warning("⚠️ Tarama başarıyla yapıldı ancak arama motorlarında bu kelimeyle eşleşen herhangi bir açık Telegram davet linki bulunamadı. Lütfen kelimeyi değiştirerek (örn: 'bahis iddaa' şeklinde) deneyin.")
 
-    return list(temiz_kanallar)[:limit]
+    return temiz_kanallar[:limit]
 
 if st.button("🔍 Kanal Taramasını Başlat"):
     if hedef_kelime:
