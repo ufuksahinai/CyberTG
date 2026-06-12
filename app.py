@@ -36,29 +36,38 @@ def bagimsiz_kanal_ara(kelime, limit):
     kanallar = set()
     sorgu = f'site:t.me "{kelime}"'
     
-    # Tarayıcı taklidi yapan başlıklar (Anti-Ban)
+    # Çok daha gerçekçi bir tarayıcı taklidi (Anti-Ban)
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
     }
     
-    # Google yerine IP engeli atmayan Yahoo arama motorunu kullanıyoruz
-    url = f"https://search.yahoo.com/search?p={sorgu}&n={limit}"
+    # Bulut IP'lerine en az ban atan arama motorları sırasıyla denenir
+    motorlar = [
+        f"https://html.duckduckgo.com/html/?q={sorgu}",
+        f"https://www.bing.com/search?q={sorgu}"
+    ]
     
-    try:
-        cevap = requests.get(url, headers=headers, timeout=15)
-        
-        # Sitedeki tüm bağlantıları tek tek aramak yerine Regex ile t.me linklerini havada yakalıyoruz
-        # Sadece 5 karakterden uzun geçerli Telegram kullanıcı adlarını filtreler
-        bulunan_isimler = re.findall(r't\.me/([a-zA-Z0-9_]{5,})', cevap.text)
-        
-        for isim in bulunan_isimler:
-            # Fonksiyonel ve alakasız Telegram sayfalarını filtrele
-            if isim.lower() not in ["share", "joinchat", "setlanguage", "socks"]:
-                kanallar.add(f"https://t.me/{isim}")
+    for url in motorlar:
+        try:
+            cevap = requests.get(url, headers=headers, timeout=10)
+            
+            # Hem normal "t.me/" hem de arama motorlarının gizlediği "t.me%2F" formatını havada yakalar
+            bulunan_isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
+            
+            for isim in bulunan_isimler:
+                # Fonksiyonel ve alakasız Telegram sayfalarını filtrele
+                if isim.lower() not in ["share", "joinchat", "setlanguage", "socks", "search"]:
+                    kanallar.add(f"https://t.me/{isim}")
+            
+            # Eğer DuckDuckGo'dan sonuç bulduysa Bing'i yormadan döngüden çık
+            if len(kanallar) > 0:
+                break
                 
-    except Exception as e:
-        st.error(f"Arama motoruna bağlanırken hata oluştu: {e}")
-        
+        except Exception as e:
+            continue # Motor engellerse veya yanıt vermezse çökme, diğer motora geç
+            
     return list(kanallar)
 
 if st.button("🔍 Kanal Taramasını Başlat"):
