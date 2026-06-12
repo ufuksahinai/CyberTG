@@ -2,15 +2,16 @@ import streamlit as st
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import time
 import re
+import time
+import urllib.parse
 from io import BytesIO
 from fpdf import FPDF
 
 # --- ARAYÜZ YAPILANDIRMASI ---
-st.set_page_config(page_title="Siber Telegram OSINT", page_icon="🕵️‍♂️", layout="wide")
-st.title("🕵️‍♂️ Siber Telegram Tarama Aracı")
-st.write("UYARI: Yalnızca açık kaynakları tarar ve Telegram güncellemelerine bağlı olarak eksik veri sağlayabilir!")
+st.set_page_config(page_title="Tam Bağımsız Telegram OSINT", page_icon="🕵️‍♂️", layout="wide")
+st.title("🕵️‍♂️ Tam Bağımsız Telegram İstihbarat Aracı")
+st.write("Google API veya Telegram girişi gerektirmez. %100 Anonim olarak açık kaynakları tarar.")
 st.markdown("---")
 
 # --- HAFIZA (SESSION STATE) ---
@@ -28,45 +29,20 @@ st.header("1. Aşama: Hedef Kanalların Tespiti")
 col1, col2 = st.columns(2)
 
 with col1:
-    hedef_kelime = st.text_input("Kanal Bulmak İçin Anahtar Kelime:", placeholder="Örn: yapay zeka")
+    hedef_kelime = st.text_input("Kanal Bulmak İçin Anahtar Kelime:", placeholder="Örn: bahis")
 with col2:
     kanal_limiti = st.selectbox("Bulunacak Maksimum Kanal Sayısı (Tahmini):", [20, 50, 100])
 
-import urllib.parse
-
-import urllib.parse
-from bs4 import BeautifulSoup
-import requests
-import re
-import time
-
-import cloudscraper
-from duckduckgo_search import DDGS
-import urllib.parse
-from bs4 import BeautifulSoup
-import re
-import streamlit as st
-
-import urllib.parse
-from bs4 import BeautifulSoup
-import re
-import requests
-import time
-import streamlit as st
-
 def bagimsiz_kanal_ara(kelime, limit):
     kanallar = set()
-    loglar = [] # Ekranda ne olduğunu göreceğimiz rapor listesi
+    loglar = [] 
     sorgu = f'site:t.me "{kelime}"'
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     }
 
-    # ==========================================
-    # 1. YÖNTEM: DUCKDUCKGO LITE (Kapalı Paket - POST Metodu)
-    # Kütüphane kullanmaz. Doğrudan sunucuya WAF atlatıcı paket atar.
-    # ==========================================
+    # YÖNTEM 1: DUCKDUCKGO LITE (Kapalı Paket - POST Metodu)
     try:
         url = "https://lite.duckduckgo.com/lite/"
         payload = {'q': sorgu}
@@ -76,16 +52,13 @@ def bagimsiz_kanal_ara(kelime, limit):
             isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
             for isim in isimler:
                 kanallar.add(f"https://t.me/{isim}")
-            loglar.append(f"✅ DuckDuckGo Lite: Başarıyla tarandı. ({len(isimler)} ham veri)")
+            loglar.append(f"✅ DuckDuckGo Lite: Başarıyla tarandı. ({len(isimler)} ham veri toplandı)")
         else:
             loglar.append(f"❌ DuckDuckGo Lite Engelledi: HTTP Kodu {cevap.status_code}")
     except Exception as e:
         loglar.append(f"❌ DuckDuckGo Lite Bağlantı Hatası: {e}")
 
-    # ==========================================
-    # 2. YÖNTEM: SEARXNG (Özgür Motorlar - Saf JSON Mimarisi)
-    # Kütüphane kullanmaz. Doğrudan API yanıtlarını çeker.
-    # ==========================================
+    # YÖNTEM 2: SEARXNG (Özgür Motorlar - Saf JSON Mimarisi)
     searx_motorlari = [
         "https://searx.be/search",
         "https://searx.tiekoetter.com/search",
@@ -108,15 +81,13 @@ def bagimsiz_kanal_ara(kelime, limit):
                         if eslesme:
                             kanallar.add(f"https://t.me/{eslesme.group(1)}")
                             yeni_bulunan += 1
-                loglar.append(f"✅ SearXNG ({motor.split('/')[2]}): Başarıyla tarandı. ({yeni_bulunan} ham veri)")
+                loglar.append(f"✅ SearXNG ({motor.split('/')[2]}): Başarıyla tarandı. ({yeni_bulunan} veri toplandı)")
             else:
                 loglar.append(f"❌ SearXNG ({motor.split('/')[2]}): HTTP {cevap.status_code} ile engelledi.")
         except Exception as e:
             loglar.append(f"❌ SearXNG ({motor.split('/')[2]}): Sunucu yanıt vermedi.")
 
-    # ==========================================
-    # KESİN TEMİZLİK (Menü ve Botların Silinmesi)
-    # ==========================================
+    # KESİN TEMİZLİK
     temiz_kanallar = list()
     yasakli_kelimeler = [
         "share", "joinchat", "setlanguage", "socks", "search", "category", "contact", 
@@ -131,16 +102,14 @@ def bagimsiz_kanal_ara(kelime, limit):
             if not any(y in k.lower() for y in ["joinchat", "setlanguage", "share"]):
                 temiz_kanallar.append(k)
 
-    # ==========================================
     # GÖRSEL RAPOR EKRANI (LOGLAR)
-    # ==========================================
-    with st.expander("🔍 Tarama Raporunu Göster (Tıklayın)", expanded=True):
+    with st.expander("🔍 Geliştirici Raporu (Hangi Veri Nereden Çekildi?)", expanded=True):
         for log in loglar:
             if "❌" in log: st.error(log)
             else: st.success(log)
             
         if len(temiz_kanallar) == 0:
-            st.warning("⚠️ Tarama başarıyla yapıldı ancak arama motorlarında bu kelimeyle eşleşen herhangi bir açık Telegram davet linki bulunamadı. Lütfen kelimeyi değiştirerek (örn: 'bahis iddaa' şeklinde) deneyin.")
+            st.warning("⚠️ Tarama çalıştı ancak motorlarda bu kelimeyle eşleşen Telegram davet linki bulunamadı.")
 
     return temiz_kanallar[:limit]
 
@@ -151,9 +120,6 @@ if st.button("🔍 Kanal Taramasını Başlat"):
             st.session_state.bulunan_kanallar = sonuclar
             st.session_state.bulunan_mesajlar = [] 
             st.session_state.tarama_bitti = False
-            
-            if len(sonuclar) == 0:
-                st.warning("Eşleşen geçerli bir genel (public) kanal bulunamadı veya arama motoru anlık yanıt vermedi.")
     else:
         st.warning("Lütfen arama yapmak için bir anahtar kelime girin.")
 
@@ -168,16 +134,15 @@ if len(st.session_state.bulunan_kanallar) > 0:
     st.markdown("---")
     st.header("2. Aşama: Kanal İçi Mesaj Taraması (Kimliksiz)")
     
-    mesaj_kelimesi = st.text_input("Sohbet Geçmişinde Aranacak Kelime:", placeholder="Örn: siber saldırı")
+    mesaj_kelimesi = st.text_input("Sohbet Geçmişinde Aranacak Kelime:", placeholder="Örn: iddaa")
 
     def web_view_mesaj_tara(kanallar, aranacak_kelime):
         veriler = []
         aranacak_kelime_kucuk = aranacak_kelime.lower()
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         
         ilerleme = st.progress(0)
         for index, link in enumerate(kanallar):
-            # Normal t.me/ linkini, okunabilir Web View (t.me/s/) linkine çevir
             kanal_adi = link.split('t.me/')[-1].strip('/')
             web_url = f"https://t.me/s/{kanal_adi}"
             
@@ -185,16 +150,12 @@ if len(st.session_state.bulunan_kanallar) > 0:
                 cevap = requests.get(web_url, headers=headers, timeout=10)
                 if cevap.status_code == 200:
                     soup = BeautifulSoup(cevap.text, 'html.parser')
-                    
-                    # Sayfadaki tüm mesaj bloklarını bul
                     mesaj_bloklari = soup.find_all('div', class_='tgme_widget_message')
                     
                     for blok in mesaj_bloklari:
                         metin_div = blok.find('div', class_='tgme_widget_message_text')
                         if metin_div:
                             metin = metin_div.get_text(separator=' ', strip=True)
-                            
-                            # Mesajın içinde aradığımız kelime var mı?
                             if aranacak_kelime_kucuk in metin.lower():
                                 tarih_tag = blok.find('time')
                                 tarih = tarih_tag['datetime'][:16].replace('T', ' ') if tarih_tag else "Bilinmeyen Tarih"
@@ -203,19 +164,19 @@ if len(st.session_state.bulunan_kanallar) > 0:
                                     "Kanal Adı": kanal_adi,
                                     "Kanal Linki": link,
                                     "Tarih": tarih,
-                                    "Mesaj İçeriği": metin[:300] + "..." # Uzun metni kırp
+                                    "Mesaj İçeriği": metin[:300] + "..."
                                 })
-            except Exception as e:
-                pass # Ulaşılamayan kanalları atla
+            except Exception:
+                pass 
                 
-            time.sleep(1) # IP banı yememek için bekle
+            time.sleep(1) 
             ilerleme.progress((index + 1) / len(kanallar))
             
         return veriler
 
     if st.button("💬 Sohbet Taramasını Başlat"):
         if mesaj_kelimesi:
-            with st.spinner("Telegram Web Görünümü (Web View) üzerinden mesajlar kimliksiz olarak okunuyor..."):
+            with st.spinner("Telegram Web Görünümü üzerinden mesajlar aranıyor..."):
                 sonuclar = web_view_mesaj_tara(st.session_state.bulunan_kanallar, mesaj_kelimesi)
                 st.session_state.bulunan_mesajlar = sonuclar
                 st.session_state.tarama_bitti = True
@@ -233,13 +194,11 @@ if st.session_state.tarama_bitti:
         df = pd.DataFrame(st.session_state.bulunan_mesajlar)
         st.dataframe(df, use_container_width=True)
         
-        # Excel
         excel_output = BytesIO()
         with pd.ExcelWriter(excel_output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Bulgular')
         excel_data = excel_output.getvalue()
         
-        # PDF
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", size=12)
@@ -253,11 +212,11 @@ if st.session_state.tarama_bitti:
         
         pdf_data = pdf.output(dest='S').encode('latin-1')
 
-        st.success("Tarama tamamlandı! Kimliğiniz tamamen gizli tutularak elde edilen bulgular aşağıdadır.")
+        st.success("Taramalar başarıyla raporlandı! Aşağıdan dosyalarınızı indirebilirsiniz.")
         col_ex, col_pdf = st.columns(2)
         with col_ex:
-            st.download_button(label="📥 Excel Olarak İndir", data=excel_data, file_name="anonim_osint_raporu.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button(label="📥 Excel Olarak İndir", data=excel_data, file_name="telegram_rapor.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         with col_pdf:
-            st.download_button(label="📄 PDF Olarak İndir", data=pdf_data, file_name="anonim_osint_raporu.pdf", mime="application/pdf")
+            st.download_button(label="📄 PDF Olarak İndir", data=pdf_data, file_name="telegram_rapor.pdf", mime="application/pdf")
     else:
-        st.warning(f"Taranan kanalların son güncel mesajları arasında '{mesaj_kelimesi}' kelimesine rastlanmadı.")
+        st.warning(f"Belirlediğiniz kanalların son güncel mesajları arasında '{mesaj_kelimesi}' kelimesine rastlanmadı.")
