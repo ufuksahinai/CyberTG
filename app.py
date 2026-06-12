@@ -36,39 +36,47 @@ def bagimsiz_kanal_ara(kelime, limit):
     kanallar = set()
     sorgu = f'site:t.me "{kelime}"'
     
-    # Çok daha gerçekçi bir tarayıcı taklidi (Anti-Ban)
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
     }
     
-    # Bulut IP'lerine en az ban atan arama motorları sırasıyla denenir
-    motorlar = [
-        f"https://html.duckduckgo.com/html/?q={sorgu}",
-        f"https://www.bing.com/search?q={sorgu}"
-    ]
+    # İstenen limite göre kaç sayfa gezileceğini hesapla (Her sayfa ~10 sonuç verir)
+    sayfa_adim_sayisi = (limit // 10) + 1
     
-    for url in motorlar:
+    for sayfa_kademesi in range(sayfa_adim_sayisi):
+        # Bing'de sayfalar &first=1, 11, 21, 31 şeklinde ilerler
+        first_param = (sayfa_kademesi * 10) + 1
+        url = f"https://www.bing.com/search?q={sorgu}&first={first_param}"
+        
         try:
             cevap = requests.get(url, headers=headers, timeout=10)
-            
-            # Hem normal "t.me/" hem de arama motorlarının gizlediği "t.me%2F" formatını havada yakalar
             bulunan_isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
             
+            eklenen_yeni_kanal_sayisi = 0
             for isim in bulunan_isimler:
-                # Fonksiyonel ve alakasız Telegram sayfalarını filtrele
                 if isim.lower() not in ["share", "joinchat", "setlanguage", "socks", "search"]:
-                    kanallar.add(f"https://t.me/{isim}")
+                    kanal_linki = f"https://t.me/{isim}"
+                    if kanal_linki not in kanallar:
+                        kanallar.add(kanal_linki)
+                        eklenen_yeni_kanal_sayisi += 1
             
-            # Eğer DuckDuckGo'dan sonuç bulduysa Bing'i yormadan döngüden çık
-            if len(kanallar) > 0:
+            # Eğer bu sayfada hiç yeni kanal bulamadıysa (arama motoru sonuçları bittiyse) döngüyü sonlandır
+            if eklenen_yeni_kanal_sayisi == 0:
                 break
                 
-        except Exception as e:
-            continue # Motor engellerse veya yanıt vermezse çökme, diğer motora geç
+            # İstenen hedef limite ulaşıldıysa aramayla vakit kaybetme
+            if len(kanallar) >= limit:
+                break
+                
+            time.sleep(2) # Ban yememek için arka sayfaya geçerken 2 saniye bekle
             
-    return list(kanallar)
+        except Exception as e:
+            break
+            
+    # Sadece kullanıcının istediği limit kadarını listeye çevirip döndür
+    return list(kanallar)[:limit]
 
 if st.button("🔍 Kanal Taramasını Başlat"):
     if hedef_kelime:
