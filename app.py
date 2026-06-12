@@ -32,63 +32,68 @@ with col1:
 with col2:
     kanal_limiti = st.selectbox("Bulunacak Maksimum Kanal Sayısı (Tahmini):", [20, 50, 100])
 
+import urllib.parse
+
 def bagimsiz_kanal_ara(kelime, limit):
     kanallar = set()
-    sorgu = f'site:t.me "{kelime}"'
+    sorgu = urllib.parse.quote(f'site:t.me "{kelime}"')
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-    }
-    
-    # Arka sayfalara geçebilen (sayfalama) arama motorları listesi
+    # Hedef arama motorlarının temel URL'leri
     motorlar = [
-        {"ad": "Yahoo", "url": f"https://search.yahoo.com/search?p={sorgu}&b="}, # 1, 11, 21
-        {"ad": "Bing", "url": f"https://www.bing.com/search?q={sorgu}&first="},  # 1, 11, 21
-        {"ad": "AOL", "url": f"https://search.aol.com/aol/search?q={sorgu}&b="}  # 1, 11, 21
+        f"https://www.bing.com/search?q={sorgu}&first=",
+        f"https://search.yahoo.com/search?p={sorgu}&b="
     ]
     
-    # 50 sonuç isteniyorsa motor başına yaklaşık 2-3 sayfa gezmemiz gerekir
     sayfa_sayisi = (limit // 10) + 1
     
-    for motor in motorlar:
-        if len(kanallar) >= limit:
-            break # İstenen limite ulaşıldıysa diğer motora geçme
+    for temel_url in motorlar:
+        if len(kanallar) >= limit: break
             
         for sayfa in range(sayfa_sayisi):
-            # Arama motorlarında sayfalar 1, 11, 21 şeklinde ilerler
             parametre = (sayfa * 10) + 1
-            url = motor["url"] + str(parametre)
+            hedef_url = temel_url + str(parametre)
+            
+            # KRİTİK NOKTA: Streamlit IP'sini gizlemek için AllOrigins Köprüsü (Proxy) kullanıyoruz
+            proxy_url = f"https://api.allorigins.win/get?url={urllib.parse.quote(hedef_url)}"
             
             try:
-                cevap = requests.get(url, headers=headers, timeout=10)
+                # İsteği proxy üzerinden gönderiyoruz
+                cevap = requests.get(proxy_url, timeout=15)
+                veri = cevap.json()
                 
-                # Şifrelenmiş veya açık t.me bağlantılarını yakala
-                bulunan_isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
+                # Proxy başarılı olduysa sayfanın HTML içeriğini al
+                html_icerik = veri.get("contents", "")
+                
+                # Eğer proxy anlık olarak yanıt vermezse yedek (doğrudan) istek at
+                if not html_icerik:
+                    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                    html_icerik = requests.get(hedef_url, headers=headers, timeout=10).text
+                
+                # Arama motorlarının gizlediği şifreli linkleri (t.me%2F) ve açık linkleri (t.me/) yakala
+                bulunan_isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', html_icerik)
                 
                 yeni_eklenen = 0
                 for isim in bulunan_isimler:
-                    # Alakasız Telegram komutlarını temizle
+                    # Alakasız Telegram komutlarını listeye sokma
                     if isim.lower() not in ["share", "joinchat", "setlanguage", "socks", "search"]:
                         kanal_linki = f"https://t.me/{isim}"
                         if kanal_linki not in kanallar:
                             kanallar.add(kanal_linki)
                             yeni_eklenen += 1
                 
-                # Eğer o sayfa boş geldiyse (motor sınırı veya ban), hemen bir sonraki motora geç
+                # Sayfada hiç yeni kanal kalmadıysa (arama bittiyse) diğer motora geç
                 if yeni_eklenen == 0:
                     break 
                     
                 if len(kanallar) >= limit:
                     break
                     
-                time.sleep(2) # Sayfa değiştirirken 2 saniye bekle (Bot koruması)
+                time.sleep(1) # Proxy'yi yormamak için 1 saniye bekle
                 
-            except Exception:
-                break # Herhangi bir bağlantı hatasında çökmek yerine diğer motora geç
+            except Exception as e:
+                break # Çökmeyi engelle, diğer sayfaya/motora geç
                 
-    # Toplanan sonuçları kullanıcının istediği limite kırparak gönder
+    # Listeyi istenen limite kırparak döndür
     return list(kanallar)[:limit]
 
 if st.button("🔍 Kanal Taramasını Başlat"):
