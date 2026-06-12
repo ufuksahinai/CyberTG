@@ -1,24 +1,19 @@
 import streamlit as st
 import pandas as pd
-import asyncio
+import requests
+from bs4 import BeautifulSoup
 import time
-from telethon import TelegramClient
-from duckduckgo_search import DDGS
+import re
 from io import BytesIO
 from fpdf import FPDF
 
-# --- TELEGRAM API BİLGİLERİ ---
-API_ID = st.secrets.get("API_ID", "")
-API_HASH = st.secrets.get("API_HASH", "")
-SESSION_NAME = "osint_session"
-
 # --- ARAYÜZ YAPILANDIRMASI ---
-st.set_page_config(page_title="Gelişmiş Telegram İstihbaratı", page_icon="🕵️‍♂️", layout="wide")
-st.title("🕵️‍♂️ 2 Aşamalı Telegram OSINT Aracı")
+st.set_page_config(page_title="Tam Bağımsız Telegram OSINT", page_icon="🕵️‍♂️", layout="wide")
+st.title("🕵️‍♂️ Tam Bağımsız Telegram İstihbarat Aracı")
+st.write("Google API veya Telegram girişi gerektirmez. %100 Anonim olarak açık kaynakları tarar.")
 st.markdown("---")
 
-# --- HAFIZA (SESSION STATE) YÖNETİMİ ---
-# Streamlit her butona basıldığında sayfayı yeniler. Verilerin kaybolmaması için hafızada tutuyoruz.
+# --- HAFIZA (SESSION STATE) ---
 if 'bulunan_kanallar' not in st.session_state:
     st.session_state.bulunan_kanallar = []
 if 'bulunan_mesajlar' not in st.session_state:
@@ -27,102 +22,118 @@ if 'tarama_bitti' not in st.session_state:
     st.session_state.tarama_bitti = False
 
 # ==========================================
-# 1. AŞAMA: KANAL KEŞFİ
+# 1. AŞAMA: ALTERNATİF MOTORLAR İLE KANAL KEŞFİ
 # ==========================================
 st.header("1. Aşama: Hedef Kanalların Tespiti")
 col1, col2 = st.columns(2)
 
 with col1:
-    hedef_kelime = st.text_input("Kanal Bulmak İçin Anahtar Kelime:", placeholder="Örn: yapay zeka, siber güvenlik")
+    hedef_kelime = st.text_input("Kanal Bulmak İçin Anahtar Kelime:", placeholder="Örn: yapay zeka")
 with col2:
-    kanal_limiti = st.number_input("Bulunacak Maksimum Kanal Sayısı:", min_value=1, max_value=100, value=20)
+    kanal_limiti = st.selectbox("Bulunacak Maksimum Kanal Sayısı (Tahmini):", [20, 50, 100])
+
+def bagimsiz_kanal_ara(kelime, limit):
+    kanallar = set()
+    sorgu = f'site:t.me "{kelime}"'
+    
+    # Tarayıcı taklidi yapan başlıklar (Anti-Ban)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+    }
+    
+    # Google yerine IP engeli atmayan Yahoo arama motorunu kullanıyoruz
+    url = f"https://search.yahoo.com/search?p={sorgu}&n={limit}"
+    
+    try:
+        cevap = requests.get(url, headers=headers, timeout=15)
+        
+        # Sitedeki tüm bağlantıları tek tek aramak yerine Regex ile t.me linklerini havada yakalıyoruz
+        # Sadece 5 karakterden uzun geçerli Telegram kullanıcı adlarını filtreler
+        bulunan_isimler = re.findall(r't\.me/([a-zA-Z0-9_]{5,})', cevap.text)
+        
+        for isim in bulunan_isimler:
+            # Fonksiyonel ve alakasız Telegram sayfalarını filtrele
+            if isim.lower() not in ["share", "joinchat", "setlanguage", "socks"]:
+                kanallar.add(f"https://t.me/{isim}")
+                
+    except Exception as e:
+        st.error(f"Arama motoruna bağlanırken hata oluştu: {e}")
+        
+    return list(kanallar)
 
 if st.button("🔍 Kanal Taramasını Başlat"):
     if hedef_kelime:
-        with st.spinner(f"Açık kaynaklarda '{hedef_kelime}' ile ilgili Telegram kanalları aranıyor..."):
-            dork_sorgusu = f'site:t.me "{hedef_kelime}"'
-            potansiyel_linkler = []
+        with st.spinner(f"Açık kaynaklarda '{hedef_kelime}' için gizlice Telegram kanalları aranıyor..."):
+            sonuclar = bagimsiz_kanal_ara(hedef_kelime, kanal_limiti)
+            st.session_state.bulunan_kanallar = sonuclar
+            st.session_state.bulunan_mesajlar = [] 
+            st.session_state.tarama_bitti = False
             
-            try:
-                # DuckDuckGo ile arama işlemi
-                with DDGS() as ddgs:
-                    # Gelen sonuçları bir listeye çeviriyoruz
-                    sonuclar = list(ddgs.text(dork_sorgusu, max_results=kanal_limiti))
-                    
-                    if not sonuclar:
-                        st.error("Arama motoru hiçbir sonuç döndürmedi. Bulut sunucusu (IP) geçici olarak engellenmiş olabilir.")
-                    else:
-                        for r in sonuclar:
-                            link = r.get("href", "")
-                            # t.me/ içeren geçerli bağlantıları ayıkla
-                            if "t.me/" in link and not link.endswith(".me/"):
-                                potansiyel_linkler.append(link)
-                
-                # Tekrarlayan linkleri temizle ve hafızaya kaydet
-                st.session_state.bulunan_kanallar = list(set(potansiyel_linkler))
-                st.session_state.bulunan_mesajlar = [] # Yeni aramada eski mesajları temizle
-                st.session_state.tarama_bitti = False
-                
-                # Eğer arama yapıldı ama 0 kanal bulunduysa kullanıcıyı uyar
-                if len(st.session_state.bulunan_kanallar) == 0 and len(sonuclar) > 0:
-                    st.warning(f"Sonuçlar tarandı ancak '{hedef_kelime}' kelimesi için geçerli bir Telegram davet linki bulunamadı.")
-                    
-            except Exception as e:
-                st.error(f"Arama altyapısında bir hata oluştu: {e}")
+            if len(sonuclar) == 0:
+                st.warning("Eşleşen geçerli bir genel (public) kanal bulunamadı veya arama motoru anlık yanıt vermedi.")
     else:
         st.warning("Lütfen arama yapmak için bir anahtar kelime girin.")
 
 # ==========================================
 # KANAL LİSTELEME VE 2. AŞAMAYA GEÇİŞ
 # ==========================================
-# Eğer hafızada bulunmuş kanallar varsa bu bölüm ekranda görünür
 if len(st.session_state.bulunan_kanallar) > 0:
-    st.success(f"✅ Başarılı! {len(st.session_state.bulunan_kanallar)} adet Telegram kanalı bulundu.")
+    st.success(f"✅ Başarılı! {len(st.session_state.bulunan_kanallar)} adet benzersiz Telegram kanalı tespit edildi.")
     with st.expander("Bulunan Kanalların Listesini Gör"):
         st.write(st.session_state.bulunan_kanallar)
     
     st.markdown("---")
-    st.header("2. Aşama: Kanal İçi Mesaj Taraması")
+    st.header("2. Aşama: Kanal İçi Mesaj Taraması (Kimliksiz)")
     
-    col3, col4 = st.columns(2)
-    with col3:
-        mesaj_kelimesi = st.text_input("Sohbet Geçmişinde Aranacak Kelime:", placeholder="Örn: sızma testi, veritabanı")
-    with col4:
-        mesaj_limiti = st.number_input("Kanal Başına Taranacak Mesaj Sayısı:", min_value=10, max_value=500, value=50)
+    mesaj_kelimesi = st.text_input("Sohbet Geçmişinde Aranacak Kelime:", placeholder="Örn: siber saldırı")
 
-    # Telethon Asenkron Tarama Fonksiyonu
-    async def mesaj_tara(kanallar, m_kriteri, m_limit):
+    def web_view_mesaj_tara(kanallar, aranacak_kelime):
         veriler = []
-        client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
-        await client.connect()
+        aranacak_kelime_kucuk = aranacak_kelime.lower()
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         
         ilerleme = st.progress(0)
         for index, link in enumerate(kanallar):
-            kanal_adi = link.split('t.me/')[-1].split('/')[0]
-            try:
-                entity = await client.get_entity(kanal_adi)
-                async for message in client.iter_messages(entity, search=m_kriteri, limit=m_limit):
-                    if message.text:
-                        veriler.append({
-                            "Kanal Adı": kanal_adi,
-                            "Kanal Linki": link,
-                            "Tarih": message.date.strftime("%Y-%m-%d %H:%M"),
-                            "Mesaj İçeriği": message.text[:300] + "..." # Uzun mesajları kısaltır
-                        })
-            except Exception as e:
-                pass # Gizli veya erişilemez kanalları atla
+            # Normal t.me/ linkini, okunabilir Web View (t.me/s/) linkine çevir
+            kanal_adi = link.split('t.me/')[-1].strip('/')
+            web_url = f"https://t.me/s/{kanal_adi}"
             
-            time.sleep(1) # Ban riskine karşı bekleme süresi
+            try:
+                cevap = requests.get(web_url, headers=headers, timeout=10)
+                if cevap.status_code == 200:
+                    soup = BeautifulSoup(cevap.text, 'html.parser')
+                    
+                    # Sayfadaki tüm mesaj bloklarını bul
+                    mesaj_bloklari = soup.find_all('div', class_='tgme_widget_message')
+                    
+                    for blok in mesaj_bloklari:
+                        metin_div = blok.find('div', class_='tgme_widget_message_text')
+                        if metin_div:
+                            metin = metin_div.get_text(separator=' ', strip=True)
+                            
+                            # Mesajın içinde aradığımız kelime var mı?
+                            if aranacak_kelime_kucuk in metin.lower():
+                                tarih_tag = blok.find('time')
+                                tarih = tarih_tag['datetime'][:16].replace('T', ' ') if tarih_tag else "Bilinmeyen Tarih"
+                                
+                                veriler.append({
+                                    "Kanal Adı": kanal_adi,
+                                    "Kanal Linki": link,
+                                    "Tarih": tarih,
+                                    "Mesaj İçeriği": metin[:300] + "..." # Uzun metni kırp
+                                })
+            except Exception as e:
+                pass # Ulaşılamayan kanalları atla
+                
+            time.sleep(1) # IP banı yememek için bekle
             ilerleme.progress((index + 1) / len(kanallar))
             
-        await client.disconnect()
         return veriler
 
     if st.button("💬 Sohbet Taramasını Başlat"):
         if mesaj_kelimesi:
-            with st.spinner("Bulunan Herkese Açık kanalların içerisine girilerek mesajlar taranıyor..."):
-                # Bulunan kanalları asenkron fonksiyona gönder
-                sonuclar = asyncio.run(mesaj_tara(st.session_state.bulunan_kanallar, mesaj_kelimesi, mesaj_limiti))
+            with st.spinner("Telegram Web Görünümü (Web View) üzerinden mesajlar kimliksiz olarak okunuyor..."):
+                sonuclar = web_view_mesaj_tara(st.session_state.bulunan_kanallar, mesaj_kelimesi)
                 st.session_state.bulunan_mesajlar = sonuclar
                 st.session_state.tarama_bitti = True
         else:
@@ -139,34 +150,31 @@ if st.session_state.tarama_bitti:
         df = pd.DataFrame(st.session_state.bulunan_mesajlar)
         st.dataframe(df, use_container_width=True)
         
-        # EXCEL ÇIKTISI
+        # Excel
         excel_output = BytesIO()
         with pd.ExcelWriter(excel_output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Bulgular')
         excel_data = excel_output.getvalue()
         
-        # PDF ÇIKTISI (Basit Şablon)
+        # PDF
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", size=12)
-        pdf.cell(200, 10, txt="Telegram OSINT Raporu", ln=True, align='C')
+        pdf.cell(200, 10, txt="Anonim Telegram OSINT Raporu", ln=True, align='C')
         pdf.ln(10)
         
         for index, row in df.iterrows():
-            # PDF kütüphanesi Türkçe karakterlerde sorun yaşamasın diye İngilizce karaktere çeviriyoruz
             metin = f"Kanal: {row['Kanal Adı']} | Tarih: {row['Tarih']}\nMesaj: {row['Mesaj İçeriği']}\n\n"
             temiz_metin = metin.encode('latin-1', 'replace').decode('latin-1')
             pdf.multi_cell(0, 10, txt=temiz_metin)
         
         pdf_data = pdf.output(dest='S').encode('latin-1')
 
-        st.success("Taramalar başarıyla raporlandı! Aşağıdan dosyalarınızı indirebilirsiniz.")
-        
+        st.success("Tarama tamamlandı! Kimliğiniz tamamen gizli tutularak elde edilen bulgular aşağıdadır.")
         col_ex, col_pdf = st.columns(2)
         with col_ex:
-            st.download_button(label="📥 Excel Olarak İndir", data=excel_data, file_name="telegram_rapor.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button(label="📥 Excel Olarak İndir", data=excel_data, file_name="anonim_osint_raporu.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         with col_pdf:
-            st.download_button(label="📄 PDF Olarak İndir", data=pdf_data, file_name="telegram_rapor.pdf", mime="application/pdf")
-            
+            st.download_button(label="📄 PDF Olarak İndir", data=pdf_data, file_name="anonim_osint_raporu.pdf", mime="application/pdf")
     else:
-        st.warning("Tüm kanallar tarandı ancak belirlediğiniz kriterde bir mesaja rastlanmadı.")
+        st.warning(f"Taranan kanalların son güncel mesajları arasında '{mesaj_kelimesi}' kelimesine rastlanmadı.")
