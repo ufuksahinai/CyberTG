@@ -10,7 +10,7 @@ from fpdf import FPDF
 # --- ARAYÜZ YAPILANDIRMASI ---
 st.set_page_config(page_title="Siber Telegram OSINT", page_icon="🕵️‍♂️", layout="wide")
 st.title("🕵️‍♂️ Siber Telegram İstihbarat Aracı")
-st.write("Google API veya Telegram girişi gerektirmez. %100 Anonim olarak açık kaynakları tarar.")
+st.write("UYARI: Yalnızca açık kaynakları tarar ve Telegram güncellemelerine bağlı olarak eksik veri sağlayabilir!")
 st.markdown("---")
 
 # --- HAFIZA (SESSION STATE) ---
