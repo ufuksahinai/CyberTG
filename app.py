@@ -7,26 +7,22 @@ import time
 from io import BytesIO
 from fpdf import FPDF
 
-# --- ÇÖKME ÖNLEYİCİ - DEĞİŞKENLERİ SABİTLE ---
-hedef_kelime = ""
-mesaj_kelimesi = ""
-
 # --- ARAYÜZ YAPILANDIRMASI ---
 st.set_page_config(page_title="Tam Bağımsız Telegram OSINT", page_icon="🕵️‍♂️", layout="wide")
 st.title("🕵️‍♂️ Tam Bağımsız Telegram İstihbarat Aracı")
 st.write("Google API veya Telegram girişi gerektirmez. %100 Anonim olarak açık kaynakları tarar.")
 st.markdown("---")
 
-# --- HAFIZA (SESSION STATE) ---
+# --- HAFIZA (SESSION STATE) GÜVENLİ BAŞLATMA ---
 if 'bulunan_kanallar' not in st.session_state:
-    st.session_state.bulunan_kanallar = []
+    st.session_state['bulunan_kanallar'] = []
 if 'bulunan_mesajlar' not in st.session_state:
-    st.session_state.bulunan_mesajlar = []
+    st.session_state['bulunan_mesajlar'] = []
 if 'tarama_bitti' not in st.session_state:
-    st.session_state.tarama_bitti = False
+    st.session_state['tarama_bitti'] = False
 
 # ==========================================
-# KANAL TARAMA FONKSİYONU (SIFIR KÜTÜPHANE HATASI)
+# KANAL TARAMA FONKSİYONU
 # ==========================================
 def bagimsiz_kanal_ara(kelime, limit):
     kanallar = set()
@@ -40,13 +36,12 @@ def bagimsiz_kanal_ara(kelime, limit):
     # YÖNTEM 1: DUCKDUCKGO LITE
     try:
         url = "https://lite.duckduckgo.com/lite/"
-        # requests kütüphanesi kodlamayı kendi yapar, urllib'e ihtiyaç duymaz.
         cevap = requests.post(url, data={'q': sorgu}, headers=headers, timeout=10)
         if cevap.status_code == 200:
             isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
             for isim in isimler:
                 kanallar.add(f"https://t.me/{isim}")
-            loglar.append(f"✅ DuckDuckGo Lite: Başarıyla {len(isimler)} veri topladı.")
+            loglar.append(f"✅ DuckDuckGo Lite: Başarıyla {len(isimler)} ham veri topladı.")
         else:
             loglar.append(f"❌ DuckDuckGo Lite Engelledi: HTTP Kodu {cevap.status_code}")
     except Exception as e:
@@ -106,9 +101,8 @@ def bagimsiz_kanal_ara(kelime, limit):
 
     return temiz_kanallar[:limit]
 
-
 # ==========================================
-# 1. AŞAMA: ARAYÜZ (FORM KULLANIMI)
+# 1. AŞAMA: ARAYÜZ
 # ==========================================
 st.header("1. Aşama: Hedef Kanalların Tespiti")
 
@@ -125,19 +119,22 @@ if kanal_arama_baslat:
     if hedef_kelime:
         with st.spinner(f"Açık kaynaklarda '{hedef_kelime}' için gizlice Telegram kanalları aranıyor..."):
             sonuclar = bagimsiz_kanal_ara(hedef_kelime, kanal_limiti)
-            st.session_state.bulunan_kanallar = sonuclar
-            st.session_state.bulunan_mesajlar = [] 
-            st.session_state.tarama_bitti = False
+            st.session_state['bulunan_kanallar'] = sonuclar
+            st.session_state['bulunan_mesajlar'] = [] 
+            st.session_state['tarama_bitti'] = False
     else:
         st.error("Lütfen arama yapmak için bir anahtar kelime girin.")
 
 # ==========================================
 # KANAL LİSTELEME VE 2. AŞAMAYA GEÇİŞ
 # ==========================================
-if len(st.session_state.bulunan_kanallar) > 0:
-    st.success(f"✅ Başarılı! {len(st.session_state.bulunan_kanallar)} adet benzersiz Telegram kanalı tespit edildi.")
+# HATA ÖNLEYİCİ: .get() metodu ile hafızayı güvenli çağırma
+mevcut_kanallar = st.session_state.get('bulunan_kanallar', [])
+
+if len(mevcut_kanallar) > 0:
+    st.success(f"✅ Başarılı! {len(mevcut_kanallar)} adet benzersiz Telegram kanalı tespit edildi.")
     with st.expander("Bulunan Kanalların Listesini Gör"):
-        st.write(st.session_state.bulunan_kanallar)
+        st.write(mevcut_kanallar)
     
     st.markdown("---")
     st.header("2. Aşama: Kanal İçi Mesaj Taraması (Kimliksiz)")
@@ -187,21 +184,23 @@ if len(st.session_state.bulunan_kanallar) > 0:
     if mesaj_arama_baslat:
         if mesaj_kelimesi:
             with st.spinner("Telegram Web Görünümü üzerinden mesajlar aranıyor..."):
-                sonuclar = web_view_mesaj_tara(st.session_state.bulunan_kanallar, mesaj_kelimesi)
-                st.session_state.bulunan_mesajlar = sonuclar
-                st.session_state.tarama_bitti = True
+                sonuclar = web_view_mesaj_tara(mevcut_kanallar, mesaj_kelimesi)
+                st.session_state['bulunan_mesajlar'] = sonuclar
+                st.session_state['tarama_bitti'] = True
         else:
             st.error("Lütfen aranacak mesaj kelimesini girin.")
 
 # ==========================================
 # 3. AŞAMA: SONUÇ RAPORLAMA VE İNDİRME
 # ==========================================
-if st.session_state.tarama_bitti:
+if st.session_state.get('tarama_bitti', False):
     st.markdown("---")
     st.header("📊 Tarama Sonuçları")
     
-    if len(st.session_state.bulunan_mesajlar) > 0:
-        df = pd.DataFrame(st.session_state.bulunan_mesajlar)
+    mevcut_mesajlar = st.session_state.get('bulunan_mesajlar', [])
+    
+    if len(mevcut_mesajlar) > 0:
+        df = pd.DataFrame(mevcut_mesajlar)
         st.dataframe(df, use_container_width=True)
         
         excel_output = BytesIO()
@@ -229,4 +228,4 @@ if st.session_state.tarama_bitti:
         with col_pdf:
             st.download_button(label="📄 PDF Olarak İndir", data=pdf_data, file_name="telegram_rapor.pdf", mime="application/pdf")
     else:
-        st.warning(f"Belirlediğiniz kanalların son güncel mesajları arasında aranan kelimeye rastlanmadı.")
+        st.warning("Belirlediğiniz kanalların son güncel mesajları arasında aranan kelimeye rastlanmadı.")
