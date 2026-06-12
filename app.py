@@ -7,13 +7,13 @@ import time
 from io import BytesIO
 from fpdf import FPDF
 
-# --- ÇÖKME (NAME ERROR) ÖNLEYİCİ - DEĞİŞKENLERİ SABİTLE ---
+# --- ÇÖKME ÖNLEYİCİ - DEĞİŞKENLERİ SABİTLE ---
 hedef_kelime = ""
 mesaj_kelimesi = ""
 
 # --- ARAYÜZ YAPILANDIRMASI ---
-st.set_page_config(page_title="Siber Telegram OSINT", page_icon="🕵️‍♂️", layout="wide")
-st.title("🕵️‍♂️ Siber Telegram Tarama Aracı")
+st.set_page_config(page_title="Tam Bağımsız Telegram OSINT", page_icon="🕵️‍♂️", layout="wide")
+st.title("🕵️‍♂️ Tam Bağımsız Telegram İstihbarat Aracı")
 st.write("Google API veya Telegram girişi gerektirmez. %100 Anonim olarak açık kaynakları tarar.")
 st.markdown("---")
 
@@ -26,7 +26,7 @@ if 'tarama_bitti' not in st.session_state:
     st.session_state.tarama_bitti = False
 
 # ==========================================
-# KANAL TARAMA FONKSİYONU
+# KANAL TARAMA FONKSİYONU (SIFIR KÜTÜPHANE HATASI)
 # ==========================================
 def bagimsiz_kanal_ara(kelime, limit):
     kanallar = set()
@@ -37,11 +37,11 @@ def bagimsiz_kanal_ara(kelime, limit):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     }
 
-    # YÖNTEM 1: DUCKDUCKGO LITE (Kapalı Paket)
+    # YÖNTEM 1: DUCKDUCKGO LITE
     try:
         url = "https://lite.duckduckgo.com/lite/"
-        payload = {'q': sorgu}
-        cevap = requests.post(url, data=payload, headers=headers, timeout=10)
+        # requests kütüphanesi kodlamayı kendi yapar, urllib'e ihtiyaç duymaz.
+        cevap = requests.post(url, data={'q': sorgu}, headers=headers, timeout=10)
         if cevap.status_code == 200:
             isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
             for isim in isimler:
@@ -50,7 +50,7 @@ def bagimsiz_kanal_ara(kelime, limit):
         else:
             loglar.append(f"❌ DuckDuckGo Lite Engelledi: HTTP Kodu {cevap.status_code}")
     except Exception as e:
-        loglar.append(f"❌ DuckDuckGo Lite Bağlantı Hatası.")
+        loglar.append("❌ DuckDuckGo Lite Bağlantı Hatası.")
 
     # YÖNTEM 2: SEARXNG (Özgür Motorlar)
     searx_motorlari = [
@@ -112,7 +112,6 @@ def bagimsiz_kanal_ara(kelime, limit):
 # ==========================================
 st.header("1. Aşama: Hedef Kanalların Tespiti")
 
-# Form kullanılarak değişkenlerin anlık kaybolması (NameError) engellendi
 with st.form("kanal_arama_formu"):
     col1, col2 = st.columns(2)
     with col1:
