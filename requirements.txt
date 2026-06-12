@@ -1,6 +1,6 @@
 streamlit
-telethon
 pandas
-duckduckgo-search
+requests
+beautifulsoup4
 openpyxl
 fpdf
