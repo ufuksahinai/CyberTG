@@ -33,7 +33,9 @@ def bagimsiz_kanal_ara(kelime, limit):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     }
 
+    # ==========================================
     # YÖNTEM 1: DUCKDUCKGO LITE
+    # ==========================================
     try:
         url = "https://lite.duckduckgo.com/lite/"
         cevap = requests.post(url, data={'q': sorgu}, headers=headers, timeout=10)
@@ -47,35 +49,67 @@ def bagimsiz_kanal_ara(kelime, limit):
     except Exception as e:
         loglar.append("❌ DuckDuckGo Lite Bağlantı Hatası.")
 
-    # YÖNTEM 2: SEARXNG (Özgür Motorlar)
+    # ==========================================
+    # YÖNTEM 2: GENİŞLETİLMİŞ SEARXNG (Sayfa Gezintili)
+    # ==========================================
+    # Havuzu genişlettik, bulut IP'lerine en toleranslı 7 motor eklendi.
     searx_motorlari = [
         "https://searx.be/search",
         "https://searx.tiekoetter.com/search",
-        "https://search.mdosch.de/search"
+        "https://search.mdosch.de/search",
+        "https://paulgo.io/search",
+        "https://search.ononoki.org/search",
+        "https://searx.work/search",
+        "https://searx.roflcopter.fr/search"
     ]
     
+    # Sistemin istenen limite ulaşmak için arka sayfalara gitmesini sağlıyoruz
+    sayfa_hedefi = (limit // 10) + 2 
+
     for motor in searx_motorlari:
         if len(kanallar) >= limit: break
-        try:
-            params = {'q': sorgu, 'format': 'json'}
-            cevap = requests.get(motor, params=params, headers=headers, timeout=10)
-            if cevap.status_code == 200:
-                veriler = cevap.json()
-                yeni_bulunan = 0
-                for sonuc in veriler.get('results', []):
-                    link = sonuc.get('url', '')
-                    if "t.me/" in link:
-                        eslesme = re.search(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', link)
-                        if eslesme:
-                            kanallar.add(f"https://t.me/{eslesme.group(1)}")
-                            yeni_bulunan += 1
-                loglar.append(f"✅ SearXNG ({motor.split('/')[2]}): {yeni_bulunan} veri topladı.")
-            else:
-                loglar.append(f"❌ SearXNG ({motor.split('/')[2]}): Engellendi.")
-        except Exception:
-            pass
+        
+        motor_adi = motor.split('/')[2]
+        motor_basarili = 0
+        
+        for sayfa in range(1, sayfa_hedefi):
+            if len(kanallar) >= limit: break
+            try:
+                params = {'q': sorgu, 'format': 'json', 'pageno': sayfa}
+                cevap = requests.get(motor, params=params, headers=headers, timeout=10)
+                
+                if cevap.status_code == 200:
+                    veriler = cevap.json()
+                    sayfa_bulunan = 0
+                    
+                    for sonuc in veriler.get('results', []):
+                        link = sonuc.get('url', '')
+                        if "t.me/" in link:
+                            eslesme = re.search(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', link)
+                            if eslesme:
+                                kanallar.add(f"https://t.me/{eslesme.group(1)}")
+                                sayfa_bulunan += 1
+                                motor_basarili += 1
+                    
+                    # Eğer o sayfada hiç sonuç yoksa motorun limiti bitmiştir, diğer motora geç
+                    if sayfa_bulunan == 0:
+                        break
+                    
+                    time.sleep(1) # Ban yememek için arka sayfaya geçerken bekle
+                else:
+                    loglar.append(f"❌ {motor_adi}: HTTP {cevap.status_code} ile engelledi.")
+                    break # Motor engellediyse sayfalamayı bırak, diğer motora geç
+                    
+            except Exception:
+                loglar.append(f"❌ {motor_adi}: Sunucu yanıt vermedi.")
+                break
+                
+        if motor_basarili > 0:
+            loglar.append(f"✅ {motor_adi}: Toplam {motor_basarili} veri topladı.")
 
-    # KESİN TEMİZLİK
+    # ==========================================
+    # KESİN TEMİZLİK (Menü ve Botların Silinmesi)
+    # ==========================================
     temiz_kanallar = list()
     yasakli_kelimeler = [
         "share", "joinchat", "setlanguage", "socks", "search", "category", "contact", 
@@ -90,7 +124,6 @@ def bagimsiz_kanal_ara(kelime, limit):
             if not any(y in k.lower() for y in ["joinchat", "setlanguage", "share"]):
                 temiz_kanallar.append(k)
 
-    # GÖRSEL RAPOR EKRANI
     with st.expander("🔍 Geliştirici Raporu (Hangi Veri Nereden Çekildi?)", expanded=True):
         for log in loglar:
             if "❌" in log: st.error(log)
