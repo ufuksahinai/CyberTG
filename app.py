@@ -40,108 +40,98 @@ import requests
 import re
 import time
 
+import cloudscraper
+from duckduckgo_search import DDGS
+import urllib.parse
+from bs4 import BeautifulSoup
+import re
+import streamlit as st
+
 def bagimsiz_kanal_ara(kelime, limit):
     kanallar = set()
+    loglar = [] # Artık neyin ters gittiğini veya başarılı olduğunu kaydediyoruz
+
+    sorgu = f'site:t.me "{kelime}"'
     kelime_url = urllib.parse.quote(kelime)
-    sorgu = urllib.parse.quote(f'site:t.me "{kelime}"')
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/json,application/xhtml+xml'
-    }
 
     # ==========================================
-    # YÖNTEM 1: DİZİNLER (Sadece Gerçek Kanalları Okur, Menüleri Atlar)
+    # 1. YÖNTEM: DUCKDUCKGO (Dahili Proxy Kullanır)
     # ==========================================
     try:
-        # tlgrm.eu sitesindeki kanallar /channel/ ile başlar (Kategoriler ise /channels/ ile başlar)
-        url = f"https://tlgrm.eu/channels?search={kelime_url}"
-        cevap = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(cevap.text, 'html.parser')
-        
-        for a in soup.find_all('a', href=True):
-            href = a['href']
-            # Sadece gerçek kanal linklerini alıyoruz
-            if href.startswith('/channel/') and not href.startswith('/channel/category'):
-                kanal_adi = href.split('/')[-1]
-                kanallar.add(f"https://t.me/{kanal_adi}")
-    except:
-        pass
+        with DDGS() as ddgs:
+            sonuclar = list(ddgs.text(sorgu, max_results=limit))
+            for sonuc in sonuclar:
+                link = sonuc.get('href', '')
+                if "t.me/" in link:
+                    kanallar.add(link)
+        loglar.append("✅ DuckDuckGo Araması Başarılı: Bağlantılar çekildi.")
+    except Exception as e:
+        loglar.append(f"❌ DuckDuckGo Hatası: {e}")
 
+    # ==========================================
+    # 2. YÖNTEM: CLOUDSCRAPER İLE CLOUDFLARE AŞIMI (Dizin Siteleri)
+    # ==========================================
     try:
-        url = f"https://telegramchannels.me/search?q={kelime_url}"
-        cevap = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(cevap.text, 'html.parser')
+        # Normal bot değil, Chrome tarayıcısı taklidi yapan özel aşım aracı
+        scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
         
-        for a in soup.find_all('a', href=True):
-            href = a['href']
-            if href.startswith('https://telegramchannels.me/channels/') or href.startswith('/channels/'):
-                isim = href.split('/')[-1]
-                # Sitenin menü tuşlarını engelliyoruz
-                if isim not in ['category', 'search', 'add', 'contact', 'top', 'new']:
+        # Site 1: Tlgrm.eu
+        cevap = scraper.get(f"https://tlgrm.eu/channels?search={kelime_url}", timeout=15)
+        if cevap.status_code == 200:
+            soup = BeautifulSoup(cevap.text, 'html.parser')
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                if href.startswith('/channel/') and 'category' not in href:
+                    kanallar.add(f"https://t.me/{href.split('/')[-1]}")
+            loglar.append("✅ Tlgrm.eu Başarılı: Cloudflare duvarı aşıldı.")
+        else:
+            loglar.append(f"❌ Tlgrm.eu Engelledi: HTTP Kodu {cevap.status_code}")
+            
+        # Site 2: Telegramchannels.me
+        cevap2 = scraper.get(f"https://telegramchannels.me/search?q={kelime_url}", timeout=15)
+        if cevap2.status_code == 200:
+            soup2 = BeautifulSoup(cevap2.text, 'html.parser')
+            for a in soup2.find_all('a', href=True):
+                href = a['href']
+                if '/channels/' in href:
+                    isim = href.split('/')[-1]
                     kanallar.add(f"https://t.me/{isim}")
-    except:
-        pass
-
-    # ==========================================
-    # YÖNTEM 2: SEARXNG JSON API (HTML Parsing Gerektirmez, Doğrudan Link Verir)
-    # ==========================================
-    searx_motorlari = [
-        f"https://searx.be/search?q={sorgu}&format=json",
-        f"https://paulgo.io/search?q={sorgu}&format=json",
-        f"https://search.mdosch.de/search?q={sorgu}&format=json"
-    ]
-
-    for url in searx_motorlari:
-        if len(kanallar) >= limit: break
-        try:
-            cevap = requests.get(url, headers=headers, timeout=10)
-            if cevap.status_code == 200:
-                veriler = cevap.json() # Sitenin kaynak kodu yerine doğrudan JSON verisi çeker
-                for sonuc in veriler.get('results', []):
-                    link = sonuc.get('url', '')
-                    if "t.me/" in link and not link.endswith(".me/"):
-                        kanallar.add(link)
-        except:
-            pass
-
-    # ==========================================
-    # YÖNTEM 3: DUCKDUCKGO HTML (Yedek Ağ)
-    # ==========================================
-    if len(kanallar) < limit // 2:
-        try:
-            url = f"https://html.duckduckgo.com/html/?q={sorgu}"
-            cevap = requests.get(url, headers=headers, timeout=10)
-            isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
-            for isim in isimler:
-                kanallar.add(f"https://t.me/{isim}")
-        except: 
-            pass
+            loglar.append("✅ Telegramchannels.me Başarılı: Cloudflare duvarı aşıldı.")
+        else:
+            loglar.append(f"❌ Telegramchannels Engelledi: HTTP Kodu {cevap2.status_code}")
+            
+    except Exception as e:
+        loglar.append(f"❌ Cloudscraper Hatası: {e}")
 
     # ==========================================
     # KESİN TEMİZLİK VE FİLTRELEME
     # ==========================================
-    temiz_kanallar = list()
+    temiz_kanallar = set()
+    # Sahte kanalları ve menü tuşlarını kesin olarak yok etme listesi
+    yasakli = ["share", "joinchat", "setlanguage", "socks", "search", "category", "contact", "add", "top", "new"]
     
-    # Karşınıza çıkan o can sıkıcı menü kelimelerini sonsuza dek kara listeye aldık
-    yasakli_kelimeler = [
-        "share", "joinchat", "setlanguage", "socks", "search", "proxy", "category",
-        "adult", "video", "music", "books", "gaming", "blogs", "education", 
-        "entertainment", "media", "politics", "business", "crypto", "language", 
-        "sales", "suggest", "other", "index", "username", "contact", "art", "news"
-    ]
+    for k in kanallar:
+        try:
+            # Sadece t.me/ sonrasındaki "gerçek kullanıcı adını" Regex ile söküp alıyoruz
+            eslesme = re.search(r't\.me(?:/s/|/)([a-zA-Z0-9_]+)', k)
+            if eslesme:
+                isim = eslesme.group(1)
+                # İsim en az 5 harf olmalı ve menü komutlarından biri olmamalı
+                if len(isim) >= 4 and isim.lower() not in yasakli:
+                    temiz_kanallar.add(f"https://t.me/{isim}")
+        except:
+            pass
 
-    for kanal in kanallar:
-        isim = kanal.split('/')[-1].lower()
-        
-        # 1. Kural: Kanal adı en az 5 harf olmalı (t.me/abc geçersizdir)
-        # 2. Kural: Yasaklı listedeki menü isimlerinden biri olmamalı
-        if len(isim) >= 5 and isim not in yasakli_kelimeler:
-            # 3. Kural: Hatalı davet linkleri ve teknik komutlar olmamalı
-            if not any(yasakli in kanal.lower() for yasakli in ["joinchat", "setlanguage", "share", "socks", "+"]):
-                temiz_kanallar.append(kanal)
+    # KULLANICI ARAYÜZÜNE RAPOR BASMA
+    with st.expander("🔍 Geliştirici Logları (Arka Planda Neler Olduğunu Görün)"):
+        for log in loglar:
+            if "❌" in log:
+                st.error(log)
+            else:
+                st.success(log)
 
-    return temiz_kanallar[:limit]
+    return list(temiz_kanallar)[:limit]
+
 if st.button("🔍 Kanal Taramasını Başlat"):
     if hedef_kelime:
         with st.spinner(f"Açık kaynaklarda '{hedef_kelime}' için gizlice Telegram kanalları aranıyor..."):
