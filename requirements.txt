@@ -1,5 +1,5 @@
 streamlit
 telethon
 pandas
-googlesearch-python
+duckduckgo-search
 openpyxl
