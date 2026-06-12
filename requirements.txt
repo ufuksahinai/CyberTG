@@ -3,3 +3,4 @@ telethon
 pandas
 duckduckgo-search
 openpyxl
+fpdf
