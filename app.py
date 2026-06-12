@@ -36,62 +36,80 @@ import urllib.parse
 
 def bagimsiz_kanal_ara(kelime, limit):
     kanallar = set()
-    # Tırnak işaretlerini kaldırdık, arama motorunun daha fazla sonuç bulmasını sağlıyoruz
-    sorgu = f'site:t.me {kelime}'
+    kelime_url = urllib.parse.quote(kelime)
+    sorgu_url = urllib.parse.quote(f'site:t.me "{kelime}"')
     
-    # Bot olmadığımızı kanıtlayan zenginleştirilmiş, güncel başlık (Header)
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Connection': 'keep-alive'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     }
 
     # ==========================================
-    # YÖNTEM 1: ASK.COM (Bulut IP'lerine toleranslı motor)
+    # YÖNTEM 1: TELEGRAM KANAL DİZİNLERİNİ KAZIMA (Sansür ve Ban Yok)
     # ==========================================
-    sayfa_sayisi = (limit // 10) + 2
-    for sayfa in range(1, sayfa_sayisi):
-        if len(kanallar) >= limit: break
-        
-        url = f"https://www.ask.com/web?q={sorgu}&page={sayfa}"
+    dizinler = [
+        f"https://telegramchannels.me/search?q={kelime_url}",
+        f"https://tlgrm.eu/channels?search={kelime_url}"
+    ]
+    
+    for url in dizinler:
         try:
             cevap = requests.get(url, headers=headers, timeout=10)
-            isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
-            
-            yeni_bulunan = 0
+            # Dizin web sitelerindeki gizli kanal adlarını yakalar (@kanaladi veya /channels/kanaladi)
+            isimler = re.findall(r'(?:t\.me/|@|/channels/)([a-zA-Z0-9_]{5,})', cevap.text)
             for isim in isimler:
-                if isim.lower() not in ["share", "joinchat", "setlanguage", "socks", "search"]:
-                    kanallar.add(f"https://t.me/{isim}")
-                    yeni_bulunan += 1
-            
-            if yeni_bulunan == 0: 
-                break # Bu sayfada sonuç yoksa diğer yönteme geç
-                
-            time.sleep(1.5) # Anti-Ban bekleme süresi
-        except Exception:
-            break
-
-    # ==========================================
-    # YÖNTEM 2: DUCKDUCKGO LITE (POST İstek Bypassing)
-    # ==========================================
-    if len(kanallar) < limit:
-        try:
-            url = "https://lite.duckduckgo.com/lite/"
-            # Sorguyu URL'ye yazmak yerine kapalı paket (Payload) olarak gönderiyoruz
-            payload = {'q': sorgu}
-            # GET yerine POST kullanmak güvenlik duvarlarını (WAF) atlatır
-            cevap = requests.post(url, data=payload, headers=headers, timeout=10)
-            isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
-            
-            for isim in isimler:
-                if isim.lower() not in ["share", "joinchat", "setlanguage", "socks", "search"]:
-                    kanallar.add(f"https://t.me/{isim}")
+                kanallar.add(f"https://t.me/{isim}")
         except Exception:
             pass
 
-    # Toplanan benzersiz kanalları istenen limite göre kırpıp gönder
-    return list(kanallar)[:limit]
+    # ==========================================
+    # YÖNTEM 2: SANSÜRSÜZ MERKEZİYETSİZ MOTORLAR (SearXNG & Qwant)
+    # ==========================================
+    sayfa_sayisi = (limit // 10) + 2
+    ozgur_motorlar = [
+        "https://searx.be/search?q={}&pageno={}",
+        "https://paulgo.io/search?q={}&pageno={}",
+        "https://lite.qwant.com/?q={}&b={}" # Qwant için ofset: 0, 10, 20...
+    ]
+    
+    for motor_sablonu in ozgur_motorlar:
+        if len(kanallar) >= limit: break
+            
+        for sayfa in range(1, sayfa_sayisi + 1):
+            try:
+                # Qwant için sayfalama formülü farklıdır
+                if "qwant" in motor_sablonu:
+                    url = motor_sablonu.format(sorgu_url, (sayfa-1)*10)
+                else:
+                    url = motor_sablonu.format(sorgu_url, sayfa)
+                    
+                cevap = requests.get(url, headers=headers, timeout=10)
+                isimler = re.findall(r't\.me(?:%2F|/)([a-zA-Z0-9_]{5,})', cevap.text)
+                
+                yeni_eklenen = 0
+                for isim in isimler:
+                    kanallar.add(f"https://t.me/{isim}")
+                    yeni_eklenen += 1
+                
+                if yeni_eklenen == 0:
+                    break # Motor boş döndüyse diğerine atla
+                    
+                time.sleep(1) # Saniyede 1 istek
+            except Exception:
+                break
+
+    # ==========================================
+    # TEMİZLİK VE FİLTRELEME
+    # ==========================================
+    temiz_kanallar = list()
+    # Bağlantı hatalarını ve alakasız Telegram menülerini temizliyoruz
+    yasakli_kelimeler = ["share", "joinchat", "setlanguage", "socks", "search", "proxy", "addtheme", "channels", "contact"]
+    
+    for kanal in kanallar:
+        kanal_kucuk = kanal.lower()
+        if not any(yasakli in kanal_kucuk for yasakli in yasakli_kelimeler):
+            temiz_kanallar.append(kanal)
+
+    return temiz_kanallar[:limit]
 if st.button("🔍 Kanal Taramasını Başlat"):
     if hedef_kelime:
         with st.spinner(f"Açık kaynaklarda '{hedef_kelime}' için gizlice Telegram kanalları aranıyor..."):
