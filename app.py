@@ -43,18 +43,32 @@ if st.button("🔍 Kanal Taramasını Başlat"):
             dork_sorgusu = f'site:t.me "{hedef_kelime}"'
             potansiyel_linkler = []
             
-            # DuckDuckGo ile engellere takılmadan arama
-            with DDGS() as ddgs:
-                sonuclar = ddgs.text(dork_sorgusu, max_results=kanal_limiti)
-                for r in sonuclar:
-                    link = r.get("href", "")
-                    if "t.me/" in link and not link.endswith(".me/"):
-                        potansiyel_linkler.append(link)
-            
-            # Tekrarlayan linkleri temizle ve hafızaya kaydet
-            st.session_state.bulunan_kanallar = list(set(potansiyel_linkler))
-            st.session_state.bulunan_mesajlar = [] # Yeni aramada eski mesajları temizle
-            st.session_state.tarama_bitti = False
+            try:
+                # DuckDuckGo ile arama işlemi
+                with DDGS() as ddgs:
+                    # Gelen sonuçları bir listeye çeviriyoruz
+                    sonuclar = list(ddgs.text(dork_sorgusu, max_results=kanal_limiti))
+                    
+                    if not sonuclar:
+                        st.error("Arama motoru hiçbir sonuç döndürmedi. Bulut sunucusu (IP) geçici olarak engellenmiş olabilir.")
+                    else:
+                        for r in sonuclar:
+                            link = r.get("href", "")
+                            # t.me/ içeren geçerli bağlantıları ayıkla
+                            if "t.me/" in link and not link.endswith(".me/"):
+                                potansiyel_linkler.append(link)
+                
+                # Tekrarlayan linkleri temizle ve hafızaya kaydet
+                st.session_state.bulunan_kanallar = list(set(potansiyel_linkler))
+                st.session_state.bulunan_mesajlar = [] # Yeni aramada eski mesajları temizle
+                st.session_state.tarama_bitti = False
+                
+                # Eğer arama yapıldı ama 0 kanal bulunduysa kullanıcıyı uyar
+                if len(st.session_state.bulunan_kanallar) == 0 and len(sonuclar) > 0:
+                    st.warning(f"Sonuçlar tarandı ancak '{hedef_kelime}' kelimesi için geçerli bir Telegram davet linki bulunamadı.")
+                    
+            except Exception as e:
+                st.error(f"Arama altyapısında bir hata oluştu: {e}")
     else:
         st.warning("Lütfen arama yapmak için bir anahtar kelime girin.")
 
