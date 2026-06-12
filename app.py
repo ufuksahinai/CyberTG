@@ -7,6 +7,10 @@ import time
 from io import BytesIO
 from fpdf import FPDF
 
+# --- ÇÖKME ÖNLEYİCİ - DEĞİŞKENLERİ SABİTLE ---
+hedef_kelime = ""
+mesaj_kelimesi = ""
+
 # --- ARAYÜZ YAPILANDIRMASI ---
 st.set_page_config(page_title="Tam Bağımsız Telegram OSINT", page_icon="🕵️‍♂️", layout="wide")
 st.title("🕵️‍♂️ Tam Bağımsız Telegram İstihbarat Aracı")
@@ -22,7 +26,7 @@ if 'tarama_bitti' not in st.session_state:
     st.session_state['tarama_bitti'] = False
 
 # ==========================================
-# KANAL TARAMA FONKSİYONU
+# 1. AŞAMA: KANAL TARAMA FONKSİYONU (GENİŞLETİLMİŞ)
 # ==========================================
 def bagimsiz_kanal_ara(kelime, limit):
     kanallar = set()
@@ -33,9 +37,7 @@ def bagimsiz_kanal_ara(kelime, limit):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     }
 
-    # ==========================================
     # YÖNTEM 1: DUCKDUCKGO LITE
-    # ==========================================
     try:
         url = "https://lite.duckduckgo.com/lite/"
         cevap = requests.post(url, data={'q': sorgu}, headers=headers, timeout=10)
@@ -45,25 +47,19 @@ def bagimsiz_kanal_ara(kelime, limit):
                 kanallar.add(f"https://t.me/{isim}")
             loglar.append(f"✅ DuckDuckGo Lite: Başarıyla {len(isimler)} ham veri topladı.")
         else:
-            loglar.append(f"❌ DuckDuckGo Lite Engelledi: HTTP Kodu {cevap.status_code}")
-    except Exception as e:
-        loglar.append("❌ DuckDuckGo Lite Bağlantı Hatası.")
+            loglar.append(f"❌ DuckDuckGo Lite: HTTP {cevap.status_code} ile engelledi.")
+    except Exception:
+        loglar.append("❌ DuckDuckGo Lite: Bağlantı kurulamadı.")
 
-    # ==========================================
-    # YÖNTEM 2: GENİŞLETİLMİŞ SEARXNG (Sayfa Gezintili)
-    # ==========================================
-    # Havuzu genişlettik, bulut IP'lerine en toleranslı 7 motor eklendi.
+    # YÖNTEM 2: SEARXNG (Sayfalar Arası Gezinen Özgür Motorlar)
     searx_motorlari = [
         "https://searx.be/search",
         "https://searx.tiekoetter.com/search",
         "https://search.mdosch.de/search",
         "https://paulgo.io/search",
-        "https://search.ononoki.org/search",
-        "https://searx.work/search",
-        "https://searx.roflcopter.fr/search"
+        "https://search.ononoki.org/search"
     ]
     
-    # Sistemin istenen limite ulaşmak için arka sayfalara gitmesini sağlıyoruz
     sayfa_hedefi = (limit // 10) + 2 
 
     for motor in searx_motorlari:
@@ -91,15 +87,12 @@ def bagimsiz_kanal_ara(kelime, limit):
                                 sayfa_bulunan += 1
                                 motor_basarili += 1
                     
-                    # Eğer o sayfada hiç sonuç yoksa motorun limiti bitmiştir, diğer motora geç
                     if sayfa_bulunan == 0:
-                        break
-                    
-                    time.sleep(1) # Ban yememek için arka sayfaya geçerken bekle
+                        break # Bu sayfada sonuç yoksa motorun limiti bitmiştir
+                    time.sleep(1) # Ban koruması için kısa bekleme
                 else:
-                    loglar.append(f"❌ {motor_adi}: HTTP {cevap.status_code} ile engelledi.")
-                    break # Motor engellediyse sayfalamayı bırak, diğer motora geç
-                    
+                    loglar.append(f"❌ {motor_adi}: Engelledi (HTTP {cevap.status_code}).")
+                    break 
             except Exception:
                 loglar.append(f"❌ {motor_adi}: Sunucu yanıt vermedi.")
                 break
@@ -107,9 +100,7 @@ def bagimsiz_kanal_ara(kelime, limit):
         if motor_basarili > 0:
             loglar.append(f"✅ {motor_adi}: Toplam {motor_basarili} veri topladı.")
 
-    # ==========================================
-    # KESİN TEMİZLİK (Menü ve Botların Silinmesi)
-    # ==========================================
+    # KESİN TEMİZLİK (Menü ve Hatalı Linkleri Silme)
     temiz_kanallar = list()
     yasakli_kelimeler = [
         "share", "joinchat", "setlanguage", "socks", "search", "category", "contact", 
@@ -124,6 +115,7 @@ def bagimsiz_kanal_ara(kelime, limit):
             if not any(y in k.lower() for y in ["joinchat", "setlanguage", "share"]):
                 temiz_kanallar.append(k)
 
+    # GÖRSEL RAPOR EKRANI
     with st.expander("🔍 Geliştirici Raporu (Hangi Veri Nereden Çekildi?)", expanded=True):
         for log in loglar:
             if "❌" in log: st.error(log)
@@ -135,7 +127,7 @@ def bagimsiz_kanal_ara(kelime, limit):
     return temiz_kanallar[:limit]
 
 # ==========================================
-# 1. AŞAMA: ARAYÜZ
+# 1. AŞAMA: ARAYÜZ (FORM KULLANIMI)
 # ==========================================
 st.header("1. Aşama: Hedef Kanalların Tespiti")
 
@@ -161,7 +153,6 @@ if kanal_arama_baslat:
 # ==========================================
 # KANAL LİSTELEME VE 2. AŞAMAYA GEÇİŞ
 # ==========================================
-# HATA ÖNLEYİCİ: .get() metodu ile hafızayı güvenli çağırma
 mevcut_kanallar = st.session_state.get('bulunan_kanallar', [])
 
 if len(mevcut_kanallar) > 0:
